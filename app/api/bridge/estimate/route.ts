@@ -125,6 +125,11 @@ export const POST = withAuth(async (request, { user, supabase }) => {
 
     const kit = getAppKit();
     const adapter = getCircleWalletsAdapter();
+    const forwarderDestination = {
+      chain: bridgeDestChain,
+      recipientAddress: destAddress,
+      useForwarder: true as const,
+    };
 
     // Estimate costs for both FAST and SLOW transfers
     const estimates = await Promise.all([
@@ -134,11 +139,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           chain: bridgeSourceChain,
           address: sourceAddress,
         },
-        to: {
-          adapter,
-          chain: bridgeDestChain,
-          address: destAddress,
-        },
+        to: forwarderDestination,
         amount: amountString,
         config: {
           transferSpeed: "SLOW",
@@ -150,11 +151,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           chain: bridgeSourceChain,
           address: sourceAddress,
         },
-        to: {
-          adapter,
-          chain: bridgeDestChain,
-          address: destAddress,
-        },
+        to: forwarderDestination,
         amount: amountString,
         config: {
           transferSpeed: "FAST",
@@ -287,7 +284,8 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       recommendation: gatewayAvailable ? "INSTANT" : recommendation,
       isTestnet: bridgeSourceChain.includes("Sepolia") || bridgeSourceChain.includes("Fuji") || bridgeSourceChain.includes("Testnet"),
       gatewayAvailable,
-      warning: "Important: Ensure both source and destination wallets have sufficient native currency for gas fees. The destination wallet will need gas to receive the minted USDC with automatic forwarding.",
+      warning:
+        "Important: Ensure the source wallet has enough native currency for source-chain gas fees. Forwarding Service handles destination-chain mint submission.",
     });
   } catch (error) {
     console.error("Bridge estimate error:", error);

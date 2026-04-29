@@ -113,10 +113,15 @@ export const POST = withAuth(async (request, { user, supabase }) => {
 
     const kit = getAppKit();
     const adapter = getCircleWalletsAdapter();
+    const forwarderDestination = {
+      chain: bridgeDestChain,
+      recipientAddress: destAddress,
+      useForwarder: true as const,
+    };
 
     // Validate the transfer parameters early by running an estimate
     // This catches errors like insufficient balance before we commit to the transfer
-    // However, note that estimate may not always catch destination chain gas issues
+    // However, note that estimate may not always catch relay/runtime execution issues
     try {
       console.log("Validating transfer parameters...");
       const estimateResult = await kit.estimateBridge({
@@ -125,11 +130,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           chain: bridgeSourceChain,
           address: sourceAddress,
         },
-        to: {
-          adapter,
-          chain: bridgeDestChain,
-          address: destAddress,
-        },
+        to: forwarderDestination,
         amount: amountString,
         config: {
           transferSpeed: transferSpeed as "FAST" | "SLOW",
@@ -155,7 +156,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       
       if (validationError.code === 9002 || validationError.type === 'BALANCE') {
         errorMessage = "Insufficient gas";
-        errorDetails = `Not enough native currency to pay for gas fees. Please add funds to your wallets on both ${sourceChain} and ${destinationChain}.`;
+        errorDetails = `Not enough native currency to pay source-chain gas fees. Please fund the source wallet on ${sourceChain}.`;
       } else if (validationError.code === 9001 || validationError.message?.includes('Insufficient balance')) {
         errorMessage = "Insufficient USDC balance";
         errorDetails = `Not enough USDC in the source wallet to complete the transfer.`;
@@ -219,10 +220,18 @@ export const POST = withAuth(async (request, { user, supabase }) => {
 
     let burnTxHash: string | null = null;
     let mintTxHash: string | null = null;
+    const extractTxHash = (payload: any): string | null =>
+      payload?.values?.txHash ??
+      payload?.txHash ??
+      payload?.data?.txHash ??
+      payload?.values?.forwardTxHash ??
+      payload?.data?.forwardTxHash ??
+      payload?.values?.attestation?.forwardTxHash ??
+      payload?.data?.attestation?.forwardTxHash ??
+      null;
 
     kit.on("bridge.burn", async (payload: any) => {
-      const hash =
-        payload?.values?.txHash || payload?.txHash || payload?.data?.txHash;
+      const hash = extractTxHash(payload);
       if (hash && !burnTxHash) {
         burnTxHash = hash;
         await supabase
@@ -233,8 +242,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
     });
 
     kit.on("bridge.mint", async (payload: any) => {
-      const hash =
-        payload?.values?.txHash || payload?.txHash || payload?.data?.txHash;
+      const hash = extractTxHash(payload);
       if (hash) mintTxHash = hash;
     });
 
@@ -245,12 +253,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           chain: bridgeSourceChain,
           address: sourceAddress,
         },
-        to: {
-          adapter,
-          chain: bridgeDestChain,
-          address: destAddress,
-          useForwarder: true,
-        },
+        to: forwarderDestination,
         amount: amountString,
         config: {
           transferSpeed: transferSpeed as "FAST" | "SLOW",
@@ -259,7 +262,16 @@ export const POST = withAuth(async (request, { user, supabase }) => {
 
       if (!burnTxHash && result.steps && Array.isArray(result.steps)) {
         const burnStep = result.steps.find((step: any) => step.name === "burn");
-        if (burnStep?.txHash) burnTxHash = burnStep.txHash;
+        burnTxHash = extractTxHash(burnStep);
+      }
+
+      // Forwarder-only destinations may surface completion hash on mint or
+      // attestation-oriented steps instead of a traditional destination mint tx.
+      if (!mintTxHash && result.steps && Array.isArray(result.steps)) {
+        const forwarderStep = result.steps.find((step: any) =>
+          ["mint", "fetchAttestation", "reAttest"].includes(step?.name)
+        );
+        mintTxHash = extractTxHash(forwarderStep);
       }
 
       const finalStatus =
@@ -283,7 +295,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
         result: {
           amount: amountNum.toString(),
           txHash: burnTxHash,
-          mintTxHash,
+          mintTxHash: mintTxHash || undefined,
           status: finalStatus,
           state: result.state,
           details: serializeBigInt(result),
@@ -296,7 +308,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       let userMessage = bridgeError.message || "Bridge transfer failed";
       if (bridgeError.code === 9002 || bridgeError.type === "BALANCE") {
         userMessage =
-          "Insufficient gas on source or destination chain. Ensure both wallets have native currency for gas fees.";
+          "Insufficient source-chain gas. Ensure the source wallet has native currency for gas fees.";
       } else if (bridgeError.code === 9001) {
         userMessage = "Not enough USDC in the source wallet.";
       }
