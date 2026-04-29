@@ -16,21 +16,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { Blockchain } from "@circle-fin/developer-controlled-wallets";
 import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
-import {
-  initiateDepositFromCustodialWallet,
-  type SupportedChain,
-} from "@/lib/circle/gateway-sdk";
+import { initiateDepositFromCustodialWallet } from "@/lib/circle/gateway-sdk";
 import { createClient } from "@/lib/supabase/server";
-
-const DB_CHAIN_TO_SDK: Record<string, SupportedChain> = {
-  "ETH-SEPOLIA": "ethSepolia",
-  "BASE-SEPOLIA": "baseSepolia",
-  "AVAX-FUJI": "avalancheFuji",
-  "ARC-TESTNET": "arcTestnet",
-};
+import { SDK_CHAIN_BY_BLOCKCHAIN as DB_CHAIN_TO_SDK } from "@/lib/constants/chains";
+import { withAuth } from "@/lib/api/with-auth";
 
 /**
  * Resolve which Circle wallet set the new wallet should be created in.
@@ -79,19 +71,11 @@ async function resolveWalletSetId(
   return newSetId;
 }
 
-export async function POST(req: NextRequest) {
+// Authenticate FIRST. Creating a Circle wallet bills our entity, so we must
+// never call the SDK on behalf of an unauthenticated request — `withAuth`
+// enforces that.
+export const POST = withAuth(async (req, { user, supabase }) => {
   try {
-    // Authenticate FIRST. Creating a Circle wallet bills our entity, so we must
-    // never call the SDK on behalf of an unauthenticated request.
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const body = await req.json();
     const blockchain: string | undefined = body?.blockchain;
     const name: string | undefined = body?.name;
@@ -176,4 +160,4 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

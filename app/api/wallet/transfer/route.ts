@@ -16,37 +16,33 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
 import { CHAIN_TO_USDC_ADDRESS } from "@/lib/constants/usdc-addresses";
+import { validateJsonBody, evmAddressSchema } from "@/lib/api/validate";
+import { withAuth } from "@/lib/api/with-auth";
 
-// Helper to convert USDC amount to atomic units (6 decimals)
-function convertToSmallestUnit(amount: string): string {
-  const val = parseFloat(amount);
-  if (isNaN(val)) return "0";
-  return BigInt(Math.floor(val * 1_000_000)).toString();
+const bodySchema = z.object({
+  sourceWalletId: z.string().min(1),
+  destinationAddress: evmAddressSchema,
+  amount: z
+    .union([z.string(), z.number()])
+    .transform((v) => (typeof v === "string" ? Number(v) : v))
+    .refine((n) => Number.isFinite(n) && n > 0, "Amount must be positive"),
+});
+
+// Convert USDC (6 decimals) to atomic units. Use Math.round to avoid losing
+// the trailing penny on values like 0.000001 due to FP error.
+function convertToSmallestUnit(amount: number): string {
+  return BigInt(Math.round(amount * 1_000_000)).toString();
 }
 
-export async function POST(req: NextRequest) {
+export const POST = withAuth(async (req, { user, supabase }) => {
   try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { sourceWalletId, destinationAddress, amount } = await req.json();
-
-    if (!sourceWalletId || !destinationAddress || !amount) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
-    }
+    const parsed = await validateJsonBody(req, bodySchema);
+    if (!parsed.ok) return parsed.response;
+    const { sourceWalletId, destinationAddress, amount } = parsed.data;
 
     // 1. Fetch Source Wallet to get its blockchain
     const { data: sourceWallet, error: sourceError } = await supabase
@@ -63,7 +59,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const amountNum = parseFloat(amount);
+    const amountNum = amount;
 
     // 2. Get the USDC contract address for the source wallet's chain
     const usdcContractAddress = CHAIN_TO_USDC_ADDRESS[sourceWallet.blockchain];
@@ -142,4 +138,4 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

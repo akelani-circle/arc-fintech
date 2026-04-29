@@ -16,8 +16,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/api/with-auth";
 
 /**
  * @deprecated This endpoint is deprecated as of the Bridge Kit automatic forwarding integration.
@@ -30,17 +30,8 @@ import { createClient } from "@/lib/supabase/server";
  * This endpoint is kept for backward compatibility but should not be used for new transfers.
  * Use the /api/bridge/monitor endpoint to check transfer status instead.
  */
-export async function POST(request: NextRequest) {
+export const POST = withAuth(async (request, { user, supabase }) => {
   try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const body = await request.json();
     const { txHash } = body;
 
@@ -79,4 +70,4 @@ export async function POST(request: NextRequest) {
     console.error("Finalize error:", error);
     return NextResponse.json({ error: error.message || "Internal Error" }, { status: 500 });
   }
-}
+});

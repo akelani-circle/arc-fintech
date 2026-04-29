@@ -16,6 +16,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+// Next.js 16 root-level middleware (replaces middleware.ts). Picked up
+// automatically by the framework via the exported `proxy` function and
+// `config.matcher` below — do not delete or rename without updating both.
+//
+// See: https://nextjs.org/docs/app/api-reference/file-conventions/proxy
+
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseReqResClient } from "@/lib/supabase/server-client";
 

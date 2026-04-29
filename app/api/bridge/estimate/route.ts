@@ -16,71 +16,50 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 import { BridgeKit } from "@circle-fin/bridge-kit";
 import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
-import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
-import { createClient } from "@/lib/supabase/server";
-import { fetchGatewayBalance, type SupportedChain } from "@/lib/circle/gateway-sdk";
+import { fetchGatewayBalance } from "@/lib/circle/gateway-sdk";
+import { assertWalletsOwnedByUser } from "@/lib/api/ownership";
+import { validateJsonBody, blockchainSchema } from "@/lib/api/validate";
+import { withAuth } from "@/lib/api/with-auth";
+import {
+  BRIDGE_CHAIN_BY_BLOCKCHAIN,
+  SDK_CHAIN_BY_BLOCKCHAIN,
+} from "@/lib/constants/chains";
 
-// Map the blockchain identifiers used in the app to Bridge Kit supported chains
-const CHAIN_MAPPING: Record<string, string> = {
-  "ETH-SEPOLIA": "Ethereum_Sepolia",
-  "AVAX-FUJI": "Avalanche_Fuji",
-  "BASE-SEPOLIA": "Base_Sepolia",
-  "ARC-TESTNET": "Arc_Testnet"
-};
+const bodySchema = z.object({
+  sourceWalletId: z.string().min(1),
+  sourceChain: blockchainSchema,
+  destinationWalletId: z.string().min(1),
+  destinationChain: blockchainSchema,
+  amount: z
+    .union([z.string(), z.number()])
+    .transform((v) => (typeof v === "string" ? Number(v) : v))
+    .refine((n) => Number.isFinite(n) && n > 0, "Amount must be positive"),
+  transferSpeed: z.enum(["FAST", "SLOW"]).default("SLOW"),
+});
 
-export async function POST(request: NextRequest) {
+export const POST = withAuth(async (request, { user, supabase }) => {
   try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const body = await request.json();
+    const parsed = await validateJsonBody(request, bodySchema);
+    if (!parsed.ok) return parsed.response;
     const {
       sourceWalletId,
       sourceChain,
       destinationWalletId,
       destinationChain,
-      amount,
-      transferSpeed = "SLOW",
-    } = body;
-
-    // Validate required fields
-    if (
-      !sourceWalletId ||
-      !sourceChain ||
-      !destinationWalletId ||
-      !destinationChain ||
-      !amount
-    ) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
-    }
-
-    // Validate amount
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum <= 0) {
-      return NextResponse.json(
-        { error: "Invalid amount" },
-        { status: 400 }
-      );
-    }
+      amount: amountNum,
+    } = parsed.data;
 
     // Bridge Kit expects amount in human-readable decimal format
     const amountString = amountNum.toFixed(2);
 
-    // Map chains to Bridge Kit format
-    const bridgeSourceChain = CHAIN_MAPPING[sourceChain];
-    const bridgeDestChain = CHAIN_MAPPING[destinationChain];
+    // Map chains to Bridge Kit format. The blockchain enum guarantees these
+    // lookups succeed, but keep the guard to satisfy strict type checking.
+    const bridgeSourceChain = BRIDGE_CHAIN_BY_BLOCKCHAIN[sourceChain];
+    const bridgeDestChain = BRIDGE_CHAIN_BY_BLOCKCHAIN[destinationChain];
 
     if (!bridgeSourceChain || !bridgeDestChain) {
       return NextResponse.json(
@@ -89,33 +68,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get source wallet address
-    const sourceWalletResponse = await circleDeveloperSdk.getWallet({
-      id: sourceWalletId,
-    });
-
-    if (!sourceWalletResponse.data?.wallet?.address) {
+    // Confirm both wallet IDs belong to the authenticated user before we
+    // proxy any Circle SDK calls against them.
+    const owned = await assertWalletsOwnedByUser(supabase, user.id, [
+      sourceWalletId,
+      destinationWalletId,
+    ]);
+    if (!owned) {
       return NextResponse.json(
-        { error: "Source wallet not found" },
+        { error: "Wallet not found" },
         { status: 404 }
       );
     }
 
-    const sourceAddress = sourceWalletResponse.data.wallet.address;
+    const sourceAddress =
+      owned.find((w) => w.circle_wallet_id === sourceWalletId)?.address;
+    const destAddress =
+      owned.find((w) => w.circle_wallet_id === destinationWalletId)?.address;
 
-    // Get destination wallet address
-    const destWalletResponse = await circleDeveloperSdk.getWallet({
-      id: destinationWalletId,
-    });
-
-    if (!destWalletResponse.data?.wallet?.address) {
+    if (!sourceAddress || !destAddress) {
       return NextResponse.json(
-        { error: "Destination wallet not found" },
+        { error: "Wallet not found" },
         { status: 404 }
       );
     }
-
-    const destAddress = destWalletResponse.data.wallet.address;
 
     // Validate environment variables
     if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
@@ -130,15 +106,7 @@ export async function POST(request: NextRequest) {
     let gatewayBalance = 0;
 
     try {
-      // Map app chain names to Gateway SDK chain names
-      const gatewayChainMapping: Record<string, SupportedChain> = {
-        "ETH-SEPOLIA": "ethSepolia",
-        "AVAX-FUJI": "avalancheFuji",
-        "BASE-SEPOLIA": "baseSepolia",
-        "ARC-TESTNET": "arcTestnet"
-      };
-
-      const gatewaySourceChain = gatewayChainMapping[sourceChain];
+      const gatewaySourceChain = SDK_CHAIN_BY_BLOCKCHAIN[sourceChain];
       if (gatewaySourceChain) {
         const balanceData = await fetchGatewayBalance(sourceAddress as `0x${string}`);
         if (balanceData.balances && Array.isArray(balanceData.balances)) {
@@ -348,4 +316,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

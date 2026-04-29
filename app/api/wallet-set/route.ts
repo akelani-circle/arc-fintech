@@ -16,21 +16,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
-import { createClient } from "@/lib/supabase/server";
+import { withAuth } from "@/lib/api/with-auth";
 
-export async function POST(req: NextRequest) {
+export const POST = withAuth(async (req) => {
   try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const { entityName } = await req.json();
 
     if (!entityName || !entityName.trim()) {
@@ -62,4 +53,4 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

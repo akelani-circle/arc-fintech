@@ -16,21 +16,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { NextResponse } from "next/server";
 import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
 import { getUsdcBalance, type SupportedChain, USDC_ADDRESSES } from "@/lib/circle/gateway-sdk";
 import type { Address } from "viem";
+import { withAuth } from "@/lib/api/with-auth";
 
-export async function POST(req: NextRequest) {
+export const POST = withAuth(async (req, { user, supabase }) => {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     // Extract walletIds from the request body
     const body = await req.json();
     let walletIds: string[] = body?.walletIds;
@@ -161,4 +154,4 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

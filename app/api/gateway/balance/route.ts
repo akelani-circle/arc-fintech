@@ -16,22 +16,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { fetchGatewayBalance, getUsdcBalance, CHAIN_BY_DOMAIN, type SupportedChain } from "@/lib/circle/gateway-sdk";
-import { createClient } from "@/lib/supabase/server";
 import type { Address } from "viem";
+import { withAuth } from "@/lib/api/with-auth";
 
-export async function POST(req: NextRequest) {
+export const POST = withAuth(async (req, { user, supabase }) => {
   try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const { addresses } = await req.json();
 
     if (!addresses || !Array.isArray(addresses) || addresses.length === 0) {
@@ -178,4 +169,4 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

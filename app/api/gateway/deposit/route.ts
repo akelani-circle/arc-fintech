@@ -16,61 +16,37 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 import {
   initiateDepositFromCustodialWallet,
   PollingTimeoutError,
-  type SupportedChain,
+  GATEWAY_WALLET_ADDRESS,
 } from "@/lib/circle/gateway-sdk";
-import { createClient } from "@/lib/supabase/server";
+import {
+  validateJsonBody,
+  blockchainSchema,
+  evmAddressSchema,
+} from "@/lib/api/validate";
+import { SDK_CHAIN_BY_BLOCKCHAIN } from "@/lib/constants/chains";
+import { withAuth } from "@/lib/api/with-auth";
 
-// Helper to map DB blockchain strings to SDK SupportedChain types
-const DB_CHAIN_TO_SDK: Record<string, SupportedChain> = {
-  "ETH-SEPOLIA": "ethSepolia",
-  "BASE-SEPOLIA": "baseSepolia",
-  "AVAX-FUJI": "avalancheFuji",
-  "ARC-TESTNET": "arcTestnet",
-};
+const bodySchema = z.object({
+  walletAddress: evmAddressSchema,
+  blockchain: blockchainSchema,
+  amount: z
+    .union([z.string(), z.number()])
+    .transform((v) => (typeof v === "string" ? Number(v) : v))
+    .refine((n) => Number.isFinite(n) && n > 0, "Amount must be positive")
+    .refine((n) => n <= 1_000_000_000, "Amount exceeds maximum allowed value"),
+});
 
-export async function POST(req: NextRequest) {
-  let body: any = {};
-
+export const POST = withAuth(async (req, { user, supabase }) => {
   try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    body = await req.json();
-    const { walletAddress, blockchain, amount } = body;
-
-    if (!walletAddress || !blockchain || !amount) {
-      return NextResponse.json(
-        { error: "Missing required fields: walletAddress, blockchain, amount" },
-        { status: 400 }
-      );
-    }
-
-    // Convert amount to number
-    const parsedAmount = parseFloat(amount);
-
-    if (parsedAmount <= 0) {
-      return NextResponse.json(
-        { error: "Amount must be greater than 0" },
-        { status: 400 }
-      );
-    }
-
-    if (parsedAmount > 1_000_000_000) {
-      return NextResponse.json(
-        { error: "Amount exceeds maximum allowed value" },
-        { status: 400 }
-      )
-    }
+    const parsed = await validateJsonBody(req, bodySchema);
+    if (!parsed.ok) return parsed.response;
+    const { walletAddress, blockchain, amount } = parsed.data;
+    const parsedAmount = amount;
 
     // Fetch the specific wallet from Supabase to get ID, Chain, and Type
     // Filter by BOTH address AND blockchain to avoid multiple results
@@ -90,7 +66,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Map the DB blockchain string to the SDK supported chain
-    const sdkChain = DB_CHAIN_TO_SDK[wallet.blockchain];
+    const sdkChain = SDK_CHAIN_BY_BLOCKCHAIN[wallet.blockchain];
 
     if (!sdkChain) {
       return NextResponse.json(
@@ -122,7 +98,7 @@ export async function POST(req: NextRequest) {
         user_id: user.id,
         amount: parsedAmount,
         sender_address: walletAddress,
-        recipient_address: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
+        recipient_address: GATEWAY_WALLET_ADDRESS,
         circle_transaction_id: tx.id,
         blockchain: wallet.blockchain,
         type: "OUTBOUND",
@@ -133,7 +109,7 @@ export async function POST(req: NextRequest) {
       success: true,
       txHash: tx.txHash,
       chain: sdkChain,
-      amount: parseFloat(amount),
+      amount,
     });
   } catch (error: any) {
     console.error("Error in deposit:", error);
@@ -175,4 +151,4 @@ export async function POST(req: NextRequest) {
       { status: statusCode }
     );
   }
-}
+});

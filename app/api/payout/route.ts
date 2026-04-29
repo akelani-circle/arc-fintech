@@ -16,9 +16,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { NextResponse } from "next/server";
 import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
+import { withAuth } from "@/lib/api/with-auth";
 import {
   signAndSubmitGatewayBurnIntent,
   executeGatewayMint,
@@ -35,30 +35,14 @@ import {
   PollingTimeoutError,
 } from "@/lib/circle/gateway-sdk";
 import { CHAIN_TO_USDC_ADDRESS } from "@/lib/constants/usdc-addresses";
+import {
+  SDK_CHAIN_BY_BLOCKCHAIN as BLOCKCHAIN_TO_CHAIN,
+  BLOCKCHAIN_BY_SDK_CHAIN as CHAIN_TO_BLOCKCHAIN,
+  CHAIN_LABEL_BY_SDK_CHAIN as CHAIN_LABELS,
+} from "@/lib/constants/chains";
 import type { Address, Hash } from "viem";
 import { randomBytes } from "crypto";
 import { maxUint256, zeroAddress, pad } from "viem";
-
-const BLOCKCHAIN_TO_CHAIN: Record<string, SupportedChain> = {
-  "ETH-SEPOLIA": "ethSepolia",
-  "BASE-SEPOLIA": "baseSepolia",
-  "AVAX-FUJI": "avalancheFuji",
-  "ARC-TESTNET": "arcTestnet",
-};
-
-const CHAIN_TO_BLOCKCHAIN: Record<SupportedChain, string> = {
-  "ethSepolia": "ETH-SEPOLIA",
-  "baseSepolia": "BASE-SEPOLIA",
-  "avalancheFuji": "AVAX-FUJI",
-  "arcTestnet": "ARC-TESTNET",
-};
-
-const CHAIN_LABELS: Record<SupportedChain, string> = {
-  "ethSepolia": "Ethereum Sepolia",
-  "baseSepolia": "Base Sepolia",
-  "avalancheFuji": "Avalanche Fuji",
-  "arcTestnet": "Arc Testnet",
-};
 
 // Gateway fee estimates per chain (in USDC)
 // Based on https://developers.circle.com/gateway/references/fees
@@ -214,15 +198,8 @@ interface WalletBalance {
   balance: bigint;
 }
 
-export async function POST(req: NextRequest) {
+export const POST = withAuth(async (req, { user, supabase }) => {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const body = await req.json();
     const { 
       recipientAddress, 
@@ -813,4 +790,4 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

@@ -20,16 +20,27 @@ import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
+// Fail fast at module load if the webhook's required env vars aren't
+// configured. This is a service-role + public-URL pair: missing either
+// silently turned dedupe insertions into runtime errors, which is much
+// harder to debug than refusing to boot.
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
   }
-);
+  return value;
+}
+
+const SUPABASE_URL = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE_KEY = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+  },
+});
 
 type CircleNotification = {
   id: string;
@@ -107,12 +118,16 @@ export async function POST(req: NextRequest) {
     // rejects the insert and we ack with 200 without doing the side effects
     // again. This replaces the previous in-handler 30s retry loop, which
     // both blocked the response and could double-apply state on retries.
+    //
+    // The previous schema also wrote `circle_transaction_id: notification.id`
+    // alongside `notification_id`. That was a holdover from when the two
+    // fields meant different things; today they're identical, so we only
+    // store `notification_id`.
     const { error: insertErr } = await supabaseAdmin
       .from("webhook_events")
       .insert({
         notification_id: notification.id,
         notification_type: notificationType,
-        circle_transaction_id: notification.id,
         state: notification.state,
         payload: body as unknown as Record<string, unknown>,
       });
@@ -123,9 +138,16 @@ export async function POST(req: NextRequest) {
       if (code === "23505") {
         return NextResponse.json({ received: true, duplicate: true }, { status: 200 });
       }
+      // Refuse to apply the side-effects when dedupe is broken — the
+      // previous behaviour was to fall through, which made it possible to
+      // double-apply transaction updates whenever the dedupe insert failed
+      // for non-duplicate reasons (e.g. RLS misconfig). Circle will retry,
+      // and once dedupe works the next attempt will succeed exactly once.
       console.error("Failed to record webhook event:", insertErr);
-      // Fall through: still try to apply the update so we don't lose data when
-      // the dedupe table is misconfigured.
+      return NextResponse.json(
+        { error: "Failed to record webhook event" },
+        { status: 500 }
+      );
     }
 
     if (
@@ -150,9 +172,11 @@ export async function POST(req: NextRequest) {
 
       if (newStatus) {
         const txHash = notification.txHash;
+        // We filter by circle_transaction_id below — no need to also write
+        // it back into the row (the previous duplicate write was harmless
+        // but confusing).
         const updatePayload: Record<string, unknown> = {
           status: newStatus,
-          circle_transaction_id: notification.id,
           updated_at: new Date().toISOString(),
         };
         if (txHash) {
