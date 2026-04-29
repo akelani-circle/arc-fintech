@@ -11,7 +11,6 @@
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "1.2.7",
     "@circle-fin/app-kit": "1.4.1",
-    "@circle-fin/bridge-kit": "^1.6.0",
     "@circle-fin/developer-controlled-wallets": "^10.0.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/modifiers": "^9.0.0",

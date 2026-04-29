@@ -18,14 +18,13 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { BridgeKit } from "@circle-fin/bridge-kit";
-import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
+import { getAppKit, getCircleWalletsAdapter } from "@/lib/circle/app-kit";
 import { assertWalletsOwnedByUser } from "@/lib/api/ownership";
 import { validateJsonBody, blockchainSchema } from "@/lib/api/validate";
-import { BRIDGE_CHAIN_BY_BLOCKCHAIN } from "@/lib/constants/chains";
+import { APP_KIT_CHAIN_BY_BLOCKCHAIN } from "@/lib/constants/chains";
 import { withAuth } from "@/lib/api/with-auth";
 
-// Allow this handler to run for up to 60s — Bridge Kit FAST transfers
+// Allow this handler to run for up to 60s — App Kit FAST transfers
 // finish in 1-3 minutes but most testnet flows complete inside the budget,
 // and any longer outcome is reported back via webhook + the tx row update.
 export const maxDuration = 60;
@@ -55,12 +54,12 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       transferSpeed,
     } = parsed.data;
 
-    // Bridge Kit expects amount in human-readable decimal format
+    // App Kit expects amount in human-readable decimal format
     const amountString = amountNum.toFixed(2);
 
-    // Map chains to Bridge Kit format
-    const bridgeSourceChain = BRIDGE_CHAIN_BY_BLOCKCHAIN[sourceChain];
-    const bridgeDestChain = BRIDGE_CHAIN_BY_BLOCKCHAIN[destinationChain];
+    // Map chains to App Kit format
+    const bridgeSourceChain = APP_KIT_CHAIN_BY_BLOCKCHAIN[sourceChain];
+    const bridgeDestChain = APP_KIT_CHAIN_BY_BLOCKCHAIN[destinationChain];
 
     if (!bridgeSourceChain || !bridgeDestChain) {
       return NextResponse.json(
@@ -94,15 +93,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       );
     }
 
-    // Validate environment variables
-    if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
-      return NextResponse.json(
-        { error: "Circle API credentials not configured" },
-        { status: 500 }
-      );
-    }
-
-    console.log(`Using Bridge Kit for ${transferSpeed} transfer: ${amountNum} USDC from ${sourceChain} to ${destinationChain}`);
+    console.log(`Using App Kit for ${transferSpeed} transfer: ${amountNum} USDC from ${sourceChain} to ${destinationChain}`);
 
     // Minimum transfer amount validation
     // FAST transfers have higher fees that can exceed very small amounts
@@ -120,29 +111,23 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       );
     }
 
-    // Initialize Bridge Kit
-    const kit = new BridgeKit();
-
-    // Create Circle Wallets adapter
-    const adapter = createCircleWalletsAdapter({
-      apiKey: process.env.CIRCLE_API_KEY,
-      entitySecret: process.env.CIRCLE_ENTITY_SECRET,
-    });
+    const kit = getAppKit();
+    const adapter = getCircleWalletsAdapter();
 
     // Validate the transfer parameters early by running an estimate
     // This catches errors like insufficient balance before we commit to the transfer
     // However, note that estimate may not always catch destination chain gas issues
     try {
       console.log("Validating transfer parameters...");
-      const estimateResult = await kit.estimate({
+      const estimateResult = await kit.estimateBridge({
         from: {
           adapter,
-          chain: bridgeSourceChain as any,
+          chain: bridgeSourceChain,
           address: sourceAddress,
         },
         to: {
           adapter,
-          chain: bridgeDestChain as any,
+          chain: bridgeDestChain,
           address: destAddress,
         },
         amount: amountString,
@@ -214,7 +199,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
     }
 
     // Execute the bridge transfer synchronously and respond when it
-    // resolves (or fails). Bridge Kit's forwarder handles burn ->
+    // resolves (or fails). App Kit's forwarder handles burn ->
     // attestation -> mint, so on success the row is COMPLETE before we
     // return; on a transient timeout we surface 202 PENDING and the row
     // stays PENDING for the webhook / monitor poll to advance.
@@ -235,7 +220,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
     let burnTxHash: string | null = null;
     let mintTxHash: string | null = null;
 
-    kit.on("burn" as any, async (payload: any) => {
+    kit.on("bridge.burn", async (payload: any) => {
       const hash =
         payload?.values?.txHash || payload?.txHash || payload?.data?.txHash;
       if (hash && !burnTxHash) {
@@ -247,7 +232,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       }
     });
 
-    kit.on("mint" as any, async (payload: any) => {
+    kit.on("bridge.mint", async (payload: any) => {
       const hash =
         payload?.values?.txHash || payload?.txHash || payload?.data?.txHash;
       if (hash) mintTxHash = hash;
@@ -257,15 +242,15 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       const result = await kit.bridge({
         from: {
           adapter,
-          chain: bridgeSourceChain as any,
+          chain: bridgeSourceChain,
           address: sourceAddress,
         },
         to: {
           adapter,
-          chain: bridgeDestChain as any,
+          chain: bridgeDestChain,
           address: destAddress,
           useForwarder: true,
-        } as any,
+        },
         amount: amountString,
         config: {
           transferSpeed: transferSpeed as "FAST" | "SLOW",
@@ -307,7 +292,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
     } catch (bridgeError: any) {
       console.error("Bridge execution error:", bridgeError);
 
-      // Map common Bridge Kit errors to friendlier messages.
+      // Map common App Kit errors to friendlier messages.
       let userMessage = bridgeError.message || "Bridge transfer failed";
       if (bridgeError.code === 9002 || bridgeError.type === "BALANCE") {
         userMessage =

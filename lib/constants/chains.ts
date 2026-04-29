@@ -39,21 +39,7 @@ export const SUPPORTED_BLOCKCHAINS = [
 
 export type SupportedBlockchain = (typeof SUPPORTED_BLOCKCHAINS)[number];
 
-/**
- * Bridge Kit's canonical chain identifiers, keyed by DB blockchain string.
- * The map is typed with `string` keys (rather than `SupportedBlockchain`) so
- * route handlers that read `wallet.blockchain` from Supabase — which TS
- * surfaces as `string` — can index it directly. The Zod schemas in
- * `lib/api/validate.ts` enforce the actual subset at request time.
- */
-export const BRIDGE_CHAIN_BY_BLOCKCHAIN: Record<string, string> = {
-  "ETH-SEPOLIA": "Ethereum_Sepolia",
-  "AVAX-FUJI": "Avalanche_Fuji",
-  "BASE-SEPOLIA": "Base_Sepolia",
-  "ARC-TESTNET": "Arc_Testnet",
-};
-
-/** Gateway SDK's chain enum, keyed by DB blockchain string (see above). */
+/** Gateway SDK's chain enum, keyed by DB blockchain string. */
 export const SDK_CHAIN_BY_BLOCKCHAIN: Record<string, SupportedChain> = {
   "ETH-SEPOLIA": "ethSepolia",
   "AVAX-FUJI": "avalancheFuji",
@@ -86,18 +72,14 @@ export const CHAIN_LABEL_BY_BLOCKCHAIN: Record<string, string> = {
 
 /**
  * App Kit chain identifier keyed by DB blockchain string. Used by the
- * Add Funds deposit route and the Gateway balance route when calling
- * `kit.unifiedBalance.deposit` / `kit.unifiedBalance.getBalances`.
+ * Add Funds deposit route, the Gateway balance route, and the bridge
+ * routes when calling `kit.unifiedBalance.*` and `kit.bridge` /
+ * `kit.estimateBridge`.
  *
  * Typed with `string` keys (rather than `SupportedBlockchain`) so route
  * handlers that read `wallet.blockchain` from Supabase — which TS surfaces
  * as `string` — can index it directly. Zod schemas in `lib/api/validate.ts`
  * enforce the actual subset at request time.
- *
- * Mirrors `BRIDGE_CHAIN_BY_BLOCKCHAIN` because Bridge Kit and Unified
- * Balance Kit happen to use the same SDK chain identifiers today, but is
- * kept separate so future divergence (e.g. App Kit adds chains the bridge
- * route doesn't support) doesn't require a hidden coupling.
  */
 export const APP_KIT_CHAIN_BY_BLOCKCHAIN: Record<string, AppKitChain> = {
   "ETH-SEPOLIA": "Ethereum_Sepolia",

@@ -18,14 +18,13 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { BridgeKit } from "@circle-fin/bridge-kit";
-import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
+import { getAppKit, getCircleWalletsAdapter } from "@/lib/circle/app-kit";
 import { fetchGatewayBalance } from "@/lib/circle/gateway-sdk";
 import { assertWalletsOwnedByUser } from "@/lib/api/ownership";
 import { validateJsonBody, blockchainSchema } from "@/lib/api/validate";
 import { withAuth } from "@/lib/api/with-auth";
 import {
-  BRIDGE_CHAIN_BY_BLOCKCHAIN,
+  APP_KIT_CHAIN_BY_BLOCKCHAIN,
   SDK_CHAIN_BY_BLOCKCHAIN,
 } from "@/lib/constants/chains";
 
@@ -53,13 +52,13 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       amount: amountNum,
     } = parsed.data;
 
-    // Bridge Kit expects amount in human-readable decimal format
+    // App Kit expects amount in human-readable decimal format
     const amountString = amountNum.toFixed(2);
 
-    // Map chains to Bridge Kit format. The blockchain enum guarantees these
+    // Map chains to App Kit format. The blockchain enum guarantees these
     // lookups succeed, but keep the guard to satisfy strict type checking.
-    const bridgeSourceChain = BRIDGE_CHAIN_BY_BLOCKCHAIN[sourceChain];
-    const bridgeDestChain = BRIDGE_CHAIN_BY_BLOCKCHAIN[destinationChain];
+    const bridgeSourceChain = APP_KIT_CHAIN_BY_BLOCKCHAIN[sourceChain];
+    const bridgeDestChain = APP_KIT_CHAIN_BY_BLOCKCHAIN[destinationChain];
 
     if (!bridgeSourceChain || !bridgeDestChain) {
       return NextResponse.json(
@@ -90,14 +89,6 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       return NextResponse.json(
         { error: "Wallet not found" },
         { status: 404 }
-      );
-    }
-
-    // Validate environment variables
-    if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
-      return NextResponse.json(
-        { error: "Circle API credentials not configured" },
-        { status: 500 }
       );
     }
 
@@ -132,27 +123,20 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       // Continue without Gateway option
     }
 
-    // Initialize Bridge Kit
-    const kit = new BridgeKit();
-
-    // Create Circle Wallets adapter
-    const adapter = createCircleWalletsAdapter({
-      apiKey: process.env.CIRCLE_API_KEY,
-      entitySecret: process.env.CIRCLE_ENTITY_SECRET,
-    });
+    const kit = getAppKit();
+    const adapter = getCircleWalletsAdapter();
 
     // Estimate costs for both FAST and SLOW transfers
     const estimates = await Promise.all([
-      // SLOW estimate
-      kit.estimate({
+      kit.estimateBridge({
         from: {
           adapter,
-          chain: bridgeSourceChain as any,
+          chain: bridgeSourceChain,
           address: sourceAddress,
         },
         to: {
           adapter,
-          chain: bridgeDestChain as any,
+          chain: bridgeDestChain,
           address: destAddress,
         },
         amount: amountString,
@@ -160,16 +144,15 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           transferSpeed: "SLOW",
         },
       }),
-      // FAST estimate
-      kit.estimate({
+      kit.estimateBridge({
         from: {
           adapter,
-          chain: bridgeSourceChain as any,
+          chain: bridgeSourceChain,
           address: sourceAddress,
         },
         to: {
           adapter,
-          chain: bridgeDestChain as any,
+          chain: bridgeDestChain,
           address: destAddress,
         },
         amount: amountString,
