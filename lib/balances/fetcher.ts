@@ -19,18 +19,46 @@ type ChainBalanceItem = {
   balance: number
 }
 
+/**
+ * Per-chain Gateway breakdown row returned by `/api/gateway/balance`. Mirrors
+ * the App Kit `ChainBalanceBreakdown` after we map the SDK's chain enum back
+ * to our internal SDK chain key.
+ */
+type GatewayChainBalanceItem = {
+  domain: number
+  balance: number
+  pendingBalance: number
+  chain: string
+  address: string
+}
+
 type GatewayBalanceWalletResult = {
   gatewayTotal?: number
+  gatewayPending?: number
+  gatewayBalances?: GatewayChainBalanceItem[]
   chainBalances?: ChainBalanceItem[]
 }
 
 type GatewayBalanceResponse = {
   balances?: GatewayBalanceWalletResult[]
+  totalUnified?: number
+  totalUnifiedPending?: number
 }
 
 export type GatewayBalanceSummary = {
+  /**
+   * On-wallet USDC totals per chain (viem `balanceOf`). These are funds the
+   * user has *not* yet deposited into Gateway.
+   */
   totals: ChainBalances
+  /** Sum of confirmed Gateway balances across every chain and address. */
   grandTotal: number
+  /** Sum of pending Gateway balances across every chain and address. */
+  pendingTotal: number
+  /** Confirmed Gateway balance per chain. */
+  gatewayTotals: ChainBalances
+  /** Pending Gateway balance per chain. */
+  gatewayPendingTotals: ChainBalances
 }
 
 /**
@@ -40,9 +68,14 @@ export type GatewayBalanceSummary = {
 export async function fetchGatewayBalance(
   wallets: Wallet[]
 ): Promise<GatewayBalanceSummary> {
-  if (!wallets || wallets.length === 0) {
-    return { totals: { ...EMPTY_CHAIN_BALANCES }, grandTotal: 0 }
+  const empty: GatewayBalanceSummary = {
+    totals: { ...EMPTY_CHAIN_BALANCES },
+    grandTotal: 0,
+    pendingTotal: 0,
+    gatewayTotals: { ...EMPTY_CHAIN_BALANCES },
+    gatewayPendingTotals: { ...EMPTY_CHAIN_BALANCES },
   }
+  if (!wallets || wallets.length === 0) return empty
 
   const addresses = wallets.map((w) => w.address)
   const res = await fetch("/api/gateway/balance", {
@@ -53,24 +86,43 @@ export async function fetchGatewayBalance(
   if (!res.ok) throw new Error("Failed to fetch gateway balance")
 
   const data: GatewayBalanceResponse = await res.json()
-  const totals: ChainBalances = { ...EMPTY_CHAIN_BALANCES }
-  let grandTotal = 0
+  const summary: GatewayBalanceSummary = {
+    totals: { ...EMPTY_CHAIN_BALANCES },
+    grandTotal: 0,
+    pendingTotal: 0,
+    gatewayTotals: { ...EMPTY_CHAIN_BALANCES },
+    gatewayPendingTotals: { ...EMPTY_CHAIN_BALANCES },
+  }
 
   if (data.balances && Array.isArray(data.balances)) {
     data.balances.forEach((walletResult) => {
-      grandTotal += walletResult.gatewayTotal || 0
+      summary.grandTotal += walletResult.gatewayTotal || 0
+      summary.pendingTotal += walletResult.gatewayPending || 0
 
       if (walletResult.chainBalances && Array.isArray(walletResult.chainBalances)) {
         walletResult.chainBalances.forEach((cb) => {
-          if (totals[cb.chain as keyof ChainBalances] !== undefined) {
-            totals[cb.chain as keyof ChainBalances] += cb.balance
+          if (summary.totals[cb.chain as keyof ChainBalances] !== undefined) {
+            summary.totals[cb.chain as keyof ChainBalances] += cb.balance
+          }
+        })
+      }
+
+      if (
+        walletResult.gatewayBalances &&
+        Array.isArray(walletResult.gatewayBalances)
+      ) {
+        walletResult.gatewayBalances.forEach((gb) => {
+          const key = gb.chain as keyof ChainBalances
+          if (summary.gatewayTotals[key] !== undefined) {
+            summary.gatewayTotals[key] += gb.balance
+            summary.gatewayPendingTotals[key] += gb.pendingBalance
           }
         })
       }
     })
   }
 
-  return { totals, grandTotal }
+  return summary
 }
 
 /**

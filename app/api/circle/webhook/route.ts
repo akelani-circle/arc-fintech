@@ -199,15 +199,20 @@ export async function POST(req: NextRequest) {
         }
 
         if ((stdRows?.length ?? 0) === 0 && txHash) {
+          // Fallback: match by tx_hash. We use this for rows that were
+          // inserted without a Circle DCW transaction id — REBALANCE rows
+          // (Bridge Kit) and Gateway deposits routed through App Kit, both
+          // of which return only the on-chain hash, not the underlying DCW
+          // transaction id used by the webhook payload.
           const { error: rebalErr } = await supabaseAdmin
             .from("transactions")
             .update(updatePayload)
             .eq("tx_hash", txHash)
-            .eq("type", "REBALANCE")
+            .in("type", ["REBALANCE", "OUTBOUND"])
             .select("id");
 
           if (rebalErr) {
-            console.error("Supabase update error (rebalance):", rebalErr);
+            console.error("Supabase update error (tx_hash fallback):", rebalErr);
           }
         }
       }

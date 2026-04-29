@@ -77,6 +77,7 @@ export default function Page() {
     walletBalances,
     walletTotal,
     gatewayTotal,
+    gatewayPending,
     isLoadingWallet,
     isLoadingGateway,
     isLoadingData,
@@ -167,6 +168,11 @@ export default function Page() {
                   <span>
                     ${gatewayTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
+                  {gatewayPending > 0 ? (
+                    <span className="text-amber-600 dark:text-amber-400 text-sm">
+                      (+${gatewayPending.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} pending)
+                    </span>
+                  ) : null}
                   <GatewayBalanceDialog />
                 </>
               ) : (

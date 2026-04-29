@@ -17,9 +17,33 @@
  */
 
 import { NextResponse } from "next/server";
-import { fetchGatewayBalance, getUsdcBalance, CHAIN_BY_DOMAIN, type SupportedChain } from "@/lib/circle/gateway-sdk";
 import type { Address } from "viem";
+import { getUsdcBalance, DOMAIN_IDS, type SupportedChain } from "@/lib/circle/gateway-sdk";
+import { getAppKit, getCircleWalletsAdapter } from "@/lib/circle/app-kit";
+import {
+  BLOCKCHAIN_BY_APP_KIT_CHAIN,
+  SDK_CHAIN_BY_BLOCKCHAIN,
+  type AppKitChain,
+} from "@/lib/constants/chains";
 import { withAuth } from "@/lib/api/with-auth";
+
+// The four App Kit chain identifiers we query Gateway balances for. Driving
+// this from a constant rather than the values of `APP_KIT_CHAIN_BY_BLOCKCHAIN`
+// keeps the order deterministic (matters for the per-chain breakdown the UI
+// renders).
+const QUERY_CHAINS: AppKitChain[] = [
+  "Ethereum_Sepolia",
+  "Base_Sepolia",
+  "Avalanche_Fuji",
+  "Arc_Testnet",
+];
+
+const SUPPORTED_CHAINS: SupportedChain[] = [
+  "ethSepolia",
+  "baseSepolia",
+  "avalancheFuji",
+  "arcTestnet",
+];
 
 export const POST = withAuth(async (req, { user, supabase }) => {
   try {
@@ -32,9 +56,14 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       );
     }
 
-    // Filter out null/undefined addresses and deduplicate (Gateway signer wallets share the same address across chains)
-    const validAddresses = addresses.filter((addr: string | null | undefined) => addr != null && addr !== "");
-    const requestedAddresses = Array.from(new Set(validAddresses.map((addr: string) => addr.toLowerCase())));
+    // Filter out null/undefined addresses and deduplicate (Gateway signer
+    // wallets share the same EVM address across chains).
+    const validAddresses = addresses.filter(
+      (addr: string | null | undefined) => addr != null && addr !== ""
+    );
+    const requestedAddresses = Array.from(
+      new Set(validAddresses.map((addr: string) => addr.toLowerCase()))
+    );
 
     if (requestedAddresses.length === 0) {
       return NextResponse.json(
@@ -65,7 +94,9 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         .map((r) => (r.address ?? "").toLowerCase())
         .filter((a) => a.length > 0)
     );
-    const uniqueAddresses = requestedAddresses.filter((addr) => ownedSet.has(addr));
+    const uniqueAddresses = requestedAddresses.filter((addr) =>
+      ownedSet.has(addr)
+    );
 
     if (uniqueAddresses.length === 0) {
       return NextResponse.json(
@@ -74,99 +105,125 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       );
     }
 
-    const supportedChains: SupportedChain[] = [
-      "ethSepolia",
-      "baseSepolia",
-      "avalancheFuji",
-      "arcTestnet",
-    ];
+    // One App Kit call covers every owned address on every chain. The Circle
+    // Wallets adapter is developer-controlled, so each source must include the
+    // explicit address; `chains` is a per-source filter — we constrain it to
+    // the four chains we actually support so App Kit doesn't probe the rest.
+    // Failure here is non-fatal: zero out Gateway balances and let the UI
+    // continue rendering on-wallet USDC from the viem path below.
+    let breakdown: Awaited<
+      ReturnType<ReturnType<typeof getAppKit>["unifiedBalance"]["getBalances"]>
+    >["breakdown"] = [];
 
-    // Fetch balances for all unique addresses sequentially to avoid rate limits
-    const balances = [];
-    
-    for (const address of uniqueAddresses) {
-      try {
-        // Fetch Gateway balance (available balance on Gateway contracts)
-        let gatewayBalances: Array<{ domain: number; balance: number; chain: string }> = [];
-        let gatewayTotal = 0;
-
-        try {
-          const gatewayResponse = await fetchGatewayBalance(address as Address);
-
-          gatewayBalances = gatewayResponse.balances.map((b) => {
-            // Gateway API returns balance as decimal string (e.g., "1.000000"), not atomic units
-            const balance = parseFloat(b.balance);
-            const chainName = CHAIN_BY_DOMAIN[b.domain] || "unknown";
-
-            return {
-              domain: b.domain,
-              balance,
-              chain: chainName,
-              address,
-            };
-          });
-
-          gatewayTotal = gatewayBalances.reduce((sum, b) => sum + b.balance, 0);
-        } catch (error: any) {
-          console.error(`Error fetching Gateway balance for ${address}:`, error.message);
-        }
-
-        // Fetch on-chain USDC balances sequentially (wallet balances not yet deposited)
-        const chainBalances = [];
-        for (const chain of supportedChains) {
-          try {
-            const balance = await getUsdcBalance(address as Address, chain);
-            chainBalances.push({
-              chain,
-              balance: Number(balance) / 1_000_000, // Convert to USDC
-              address,
-            });
-          } catch (error) {
-            console.error(`Error fetching on-chain balance for ${chain}:`, error);
-            chainBalances.push({
-              chain,
-              balance: 0,
-              address,
-            });
-          }
-        }
-
-        // Calculate total from on-chain balances (wallet balance)
-        const walletTotal = chainBalances.reduce((sum, cb) => sum + cb.balance, 0);
-
-        balances.push({
+    try {
+      const result = await getAppKit().unifiedBalance.getBalances({
+        token: "USDC",
+        sources: uniqueAddresses.map((address) => ({
+          adapter: getCircleWalletsAdapter(),
           address,
-          gatewayBalances,
-          gatewayTotal,
-          chainBalances,
-          walletTotal,
-          totalBalance: gatewayTotal + walletTotal,
-        });
-      } catch (error: any) {
-        console.error(`Error fetching balance for ${address}:`, error);
-        balances.push({
-          address,
-          error: error.message,
-          totalBalance: 0,
-        });
-      }
+          chains: QUERY_CHAINS,
+        })),
+        networkType: "testnet",
+        includePending: true,
+      });
+      breakdown = result.breakdown;
+    } catch (error) {
+      console.error("App Kit getBalances failed:", error);
     }
 
-    // Calculate total unified balance from all addresses
-    const totalUnified = balances.reduce((sum, b) => {
-      return sum + (b.totalBalance || 0);
-    }, 0);
+    // Index App Kit's breakdown by depositor (lowercased) so we can attach
+    // the per-address Gateway numbers below without repeated `.find()` work.
+    const breakdownByDepositor = new Map(
+      breakdown.map((entry) => [entry.depositor.toLowerCase(), entry])
+    );
+
+    // Fetch on-wallet (un-deposited) USDC for every owned address. Sequential
+    // to avoid hammering the public RPCs — the four-chain loop is bounded.
+    const balances = [];
+
+    for (const address of uniqueAddresses) {
+      const entry = breakdownByDepositor.get(address);
+
+      const gatewayBalances: Array<{
+        domain: number;
+        balance: number;
+        pendingBalance: number;
+        chain: string;
+        address: string;
+      }> = [];
+      let gatewayTotal = 0;
+      let gatewayPending = 0;
+
+      if (entry) {
+        for (const chainBreakdown of entry.breakdown) {
+          const appKitChain = chainBreakdown.chain as AppKitChain;
+          const blockchain = BLOCKCHAIN_BY_APP_KIT_CHAIN[appKitChain];
+          if (!blockchain) continue;
+          const sdkChain = SDK_CHAIN_BY_BLOCKCHAIN[blockchain];
+          const domain = sdkChain ? DOMAIN_IDS[sdkChain] : -1;
+
+          const confirmed = parseFloat(chainBreakdown.confirmedBalance) || 0;
+          const pending = parseFloat(chainBreakdown.pendingBalance ?? "0") || 0;
+
+          gatewayBalances.push({
+            domain,
+            balance: confirmed,
+            pendingBalance: pending,
+            chain: sdkChain ?? "unknown",
+            address,
+          });
+
+          gatewayTotal += confirmed;
+          gatewayPending += pending;
+        }
+      }
+
+      const chainBalances = [];
+      for (const chain of SUPPORTED_CHAINS) {
+        try {
+          const balance = await getUsdcBalance(address as Address, chain);
+          chainBalances.push({
+            chain,
+            balance: Number(balance) / 1_000_000,
+            address,
+          });
+        } catch (error) {
+          console.error(`Error fetching on-chain balance for ${chain}:`, error);
+          chainBalances.push({ chain, balance: 0, address });
+        }
+      }
+
+      const walletTotal = chainBalances.reduce((sum, cb) => sum + cb.balance, 0);
+
+      balances.push({
+        address,
+        gatewayBalances,
+        gatewayTotal,
+        gatewayPending,
+        chainBalances,
+        walletTotal,
+        totalBalance: gatewayTotal + walletTotal,
+      });
+    }
+
+    const totalUnified = balances.reduce(
+      (sum, b) => sum + (b.totalBalance || 0),
+      0
+    );
+    const totalUnifiedPending = balances.reduce(
+      (sum, b) => sum + (b.gatewayPending || 0),
+      0
+    );
 
     return NextResponse.json({
       success: true,
       totalUnified,
+      totalUnifiedPending,
       balances,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error fetching balances:", error);
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
-    );
+    const message = error instanceof Error ? error.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 });

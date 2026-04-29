@@ -19,17 +19,33 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
-  initiateDepositFromCustodialWallet,
-  PollingTimeoutError,
-  GATEWAY_WALLET_ADDRESS,
-} from "@/lib/circle/gateway-sdk";
+  getErrorCode,
+  isBalanceError,
+  isInputError,
+  isKitError,
+  isNetworkError,
+} from "@circle-fin/app-kit";
+
+// App Kit balance error codes — see `BalanceError` in
+// node_modules/@circle-fin/app-kit/index.d.ts (lines 7715-7728).
+const BALANCE_INSUFFICIENT_TOKEN = 9001;
+const BALANCE_INSUFFICIENT_GAS = 9002;
+const BALANCE_INSUFFICIENT_ALLOWANCE = 9003;
+import { getAppKit, getCircleWalletsAdapter } from "@/lib/circle/app-kit";
+import { GATEWAY_WALLET_ADDRESS } from "@/lib/circle/gateway-sdk";
 import {
   validateJsonBody,
   blockchainSchema,
   evmAddressSchema,
 } from "@/lib/api/validate";
-import { SDK_CHAIN_BY_BLOCKCHAIN } from "@/lib/constants/chains";
+import { APP_KIT_CHAIN_BY_BLOCKCHAIN } from "@/lib/constants/chains";
 import { withAuth } from "@/lib/api/with-auth";
+
+// App Kit's `unifiedBalance.deposit` runs the approve + deposit pair through
+// Developer Controlled Wallets and waits for both to confirm. On busy testnets
+// that can take longer than the default Vercel function window, so we extend
+// the route's max execution time to match the bridge route.
+export const maxDuration = 60;
 
 const bodySchema = z.object({
   walletAddress: evmAddressSchema,
@@ -46,13 +62,14 @@ export const POST = withAuth(async (req, { user, supabase }) => {
     const parsed = await validateJsonBody(req, bodySchema);
     if (!parsed.ok) return parsed.response;
     const { walletAddress, blockchain, amount } = parsed.data;
-    const parsedAmount = amount;
 
-    // Fetch the specific wallet from Supabase to get ID, Chain, and Type
-    // Filter by BOTH address AND blockchain to avoid multiple results
+    // Filter by BOTH address AND blockchain to avoid multiple results — the
+    // same EVM address can appear on multiple chains for the same user. RLS
+    // already restricts to this user, but we re-filter on user_id for defense
+    // in depth.
     const { data: wallet, error: walletError } = await supabase
       .from("wallets")
-      .select("circle_wallet_id, blockchain, type, address")
+      .select("circle_wallet_id, blockchain, address")
       .eq("user_id", user.id)
       .eq("address", walletAddress)
       .eq("blockchain", blockchain)
@@ -65,90 +82,121 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       );
     }
 
-    // Map the DB blockchain string to the SDK supported chain
-    const sdkChain = SDK_CHAIN_BY_BLOCKCHAIN[wallet.blockchain];
-
-    if (!sdkChain) {
+    const appKitChain = APP_KIT_CHAIN_BY_BLOCKCHAIN[wallet.blockchain];
+    if (!appKitChain) {
       return NextResponse.json(
         { error: `Unsupported blockchain type: ${wallet.blockchain}` },
         { status: 400 }
       );
     }
 
-    // Use proper rounding to avoid losing precision for small amounts
-    const amountInAtomicUnits = BigInt(Math.round(parsedAmount * 1_000_000));
-    
-    if (amountInAtomicUnits === BigInt(0)) {
-      return NextResponse.json(
-        { error: "Amount too small. Minimum is 0.000001 USDC (1 atomic unit)." },
-        { status: 400 }
-      );
-    }
+    // App Kit's Circle Wallets adapter is "developer-controlled" — every call
+    // must pass `address` so the adapter knows which Circle wallet to use.
+    // The adapter resolves the underlying `circle_wallet_id` from the address,
+    // so we don't pass it explicitly.
+    const result = await getAppKit().unifiedBalance.deposit({
+      from: {
+        adapter: getCircleWalletsAdapter(),
+        chain: appKitChain,
+        address: wallet.address,
+      },
+      amount: amount.toString(),
+      token: "USDC",
+    });
 
-    // All deposits (SCA and EOA) use the same Circle SDK method
-    const tx = await initiateDepositFromCustodialWallet(
-      wallet.circle_wallet_id,
-      sdkChain,
-      amountInAtomicUnits
-    );
-
-    // Store transaction in database
+    // Persist the deposit as an OUTBOUND transaction with `recipient_address`
+    // pointing at the Gateway wallet contract. `isGatewayDepositRecipient`
+    // (used in dashboard activity) keys off this address, and the webhook
+    // route uses tx_hash as the fallback match for OUTBOUND/REBALANCE rows
+    // that don't have a Circle DCW transaction id (see app/api/circle/webhook).
     await supabase.from("transactions").insert([
       {
         user_id: user.id,
-        amount: parsedAmount,
+        amount,
         sender_address: walletAddress,
         recipient_address: GATEWAY_WALLET_ADDRESS,
-        circle_transaction_id: tx.id,
+        tx_hash: result.txHash,
+        circle_transaction_id: null,
         blockchain: wallet.blockchain,
         type: "OUTBOUND",
+        status: "PENDING",
       },
     ]);
 
     return NextResponse.json({
       success: true,
-      txHash: tx.txHash,
-      chain: sdkChain,
-      amount,
+      txHash: result.txHash,
+      explorerUrl: result.explorerUrl,
+      chain: result.chain,
+      amount: result.amount,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error in deposit:", error);
 
-    if (error instanceof PollingTimeoutError) {
+    // App Kit error taxonomy: BalanceError covers three distinct
+    // failure modes (insufficient USDC, insufficient native gas,
+    // insufficient ERC-20 allowance) — they share the same class but
+    // map to very different user-facing messages, so we discriminate by
+    // numeric code first. InputError → bad parameters. NetworkError →
+    // transient RPC failure. KitError → fall-through.
+    if (isBalanceError(error)) {
+      const code = getErrorCode(error);
+      if (code === BALANCE_INSUFFICIENT_GAS) {
+        // App Kit's own message is already user-friendly and chain-aware
+        // (e.g. "Insufficient ETH on Base Sepolia to cover gas fees"),
+        // so we surface it verbatim instead of a generic stand-in.
+        return NextResponse.json(
+          {
+            error:
+              error.message ||
+              "Insufficient native gas token on the source chain.",
+          },
+          { status: 400 }
+        );
+      }
+      if (code === BALANCE_INSUFFICIENT_ALLOWANCE) {
+        return NextResponse.json(
+          {
+            error:
+              "USDC allowance too low for the Gateway contract. Try again — App Kit will re-issue the approval.",
+          },
+          { status: 400 }
+        );
+      }
+      // Default + BALANCE_INSUFFICIENT_TOKEN — actual USDC shortfall.
+      void BALANCE_INSUFFICIENT_TOKEN;
       return NextResponse.json(
-        {
-          success: false,
-          status: "pending",
-          txId: error.challengeId,
-          message:
-            "Deposit submitted but did not finalize within the request window. It may still complete; refresh balances shortly.",
-        },
-        { status: 202 }
+        { error: "Insufficient USDC balance in the selected wallet." },
+        { status: 400 }
+      );
+    }
+
+    if (isInputError(error)) {
+      return NextResponse.json(
+        { error: error.message || "Invalid deposit request." },
+        { status: 400 }
+      );
+    }
+
+    if (isNetworkError(error)) {
+      return NextResponse.json(
+        { error: "Network error contacting the chain. Please try again." },
+        { status: 503 }
       );
     }
 
     let errorMessage = "Internal server error";
     let statusCode = 500;
-
-    if (error.message) {
+    if (error instanceof Error && error.message) {
       const msg = error.message.toLowerCase();
-      if (msg.includes("gas") || msg.includes("intrinsic") || msg.includes("fee")) {
-        errorMessage = "Insufficient gas. Please ensure the wallet has enough native tokens.";
-        statusCode = 400;
-      } else if (msg.includes("insufficient funds") || msg.includes("balance")) {
-        errorMessage = "Insufficient USDC balance in the selected wallet.";
-        statusCode = 400;
-      } else if (msg.includes("network") || msg.includes("timeout")) {
-        errorMessage = "Network error. Please try again.";
+      if (msg.includes("timeout")) {
+        errorMessage = "The deposit timed out. Refresh balances shortly.";
         statusCode = 503;
-      } else if (error.message.length < 200) {
+      } else if (isKitError(error) && error.message.length < 200) {
         errorMessage = error.message;
       }
     }
 
-    return NextResponse.json(
-      { error: errorMessage },
-      { status: statusCode }
-    );
+    return NextResponse.json({ error: errorMessage }, { status: statusCode });
   }
 });

@@ -11,6 +11,21 @@
 import type { SupportedChain } from "@/lib/circle/gateway-sdk";
 
 /**
+ * App Kit's `UnifiedBalanceChain` identifier strings for the chains we use.
+ * Kept as a string-literal union local to this module so consumers don't
+ * need to import the SDK to reference the type — and the constants module
+ * stays free of any server-only imports.
+ *
+ * The values are the exact enum values from
+ * `@circle-fin/app-kit`'s `UnifiedBalanceChain` enum.
+ */
+export type AppKitChain =
+  | "Ethereum_Sepolia"
+  | "Avalanche_Fuji"
+  | "Base_Sepolia"
+  | "Arc_Testnet";
+
+/**
  * The set of blockchain identifiers used in the database/API. This is the
  * canonical "DB form" used in `wallets.blockchain`, `transactions.blockchain`,
  * Circle SDK requests for wallet creation, and the chain query param.
@@ -67,6 +82,41 @@ export const CHAIN_LABEL_BY_BLOCKCHAIN: Record<string, string> = {
   "AVAX-FUJI": "Avalanche Fuji",
   "BASE-SEPOLIA": "Base Sepolia",
   "ARC-TESTNET": "Arc Testnet",
+};
+
+/**
+ * App Kit chain identifier keyed by DB blockchain string. Used by the
+ * Add Funds deposit route and the Gateway balance route when calling
+ * `kit.unifiedBalance.deposit` / `kit.unifiedBalance.getBalances`.
+ *
+ * Typed with `string` keys (rather than `SupportedBlockchain`) so route
+ * handlers that read `wallet.blockchain` from Supabase — which TS surfaces
+ * as `string` — can index it directly. Zod schemas in `lib/api/validate.ts`
+ * enforce the actual subset at request time.
+ *
+ * Mirrors `BRIDGE_CHAIN_BY_BLOCKCHAIN` because Bridge Kit and Unified
+ * Balance Kit happen to use the same SDK chain identifiers today, but is
+ * kept separate so future divergence (e.g. App Kit adds chains the bridge
+ * route doesn't support) doesn't require a hidden coupling.
+ */
+export const APP_KIT_CHAIN_BY_BLOCKCHAIN: Record<string, AppKitChain> = {
+  "ETH-SEPOLIA": "Ethereum_Sepolia",
+  "AVAX-FUJI": "Avalanche_Fuji",
+  "BASE-SEPOLIA": "Base_Sepolia",
+  "ARC-TESTNET": "Arc_Testnet",
+};
+
+/**
+ * Reverse of `APP_KIT_CHAIN_BY_BLOCKCHAIN`. App Kit's `getBalances`
+ * response identifies each chain by the SDK enum value — this map is how
+ * we translate those rows back into our DB blockchain key for the per-chain
+ * balance breakdown returned to the client.
+ */
+export const BLOCKCHAIN_BY_APP_KIT_CHAIN: Record<AppKitChain, SupportedBlockchain> = {
+  Ethereum_Sepolia: "ETH-SEPOLIA",
+  Avalanche_Fuji: "AVAX-FUJI",
+  Base_Sepolia: "BASE-SEPOLIA",
+  Arc_Testnet: "ARC-TESTNET",
 };
 
 /**

@@ -291,6 +291,20 @@ export async function addGatewayDelegate(
   return delegateTx;
 }
 
+/**
+ * @deprecated For Gateway *deposits*, use `kit.unifiedBalance.deposit` from
+ * `@circle-fin/app-kit` (see `lib/circle/app-kit.ts` and the Add Funds route
+ * at `app/api/gateway/deposit/route.ts`). This hand-rolled approve+deposit
+ * dance against the DCW SDK is kept only for two consumers that have not
+ * been migrated yet:
+ *   - `app/api/wallet/route.ts` — auto-funds new gateway-signer wallets
+ *     when they're created.
+ *   - the optional `delegateAddress` branch below, which is invoked by
+ *     `app/api/payout/route.ts` to register a Gateway delegate.
+ * Once those move to App Kit, this function and the helpers it relies on
+ * (`initiateContractInteraction`, `waitForTransactionConfirmation`,
+ * `PollingTimeoutError`) can be removed.
+ */
 export async function initiateDepositFromCustodialWallet(
   walletId: string,
   chain: SupportedChain,
@@ -742,6 +756,16 @@ export async function transferUnifiedBalanceCircle(
   };
 }
 
+/**
+ * @deprecated For Gateway balance reads on the dashboard, use App Kit's
+ * `kit.unifiedBalance.getBalances` (see `app/api/gateway/balance/route.ts`).
+ * This raw HTTP call to `gateway-api-testnet.circle.com/v1/balances` is
+ * kept only for the bridge-estimate + payout flows
+ * (`app/api/bridge/estimate/route.ts`, `app/api/payout/route.ts`), which
+ * still need the per-domain breakdown to build burn intents. Once those
+ * move to App Kit's spend/estimate APIs, this helper and the
+ * `CHAIN_BY_DOMAIN` map below can be removed.
+ */
 export async function fetchGatewayBalance(address: Address): Promise<{
   token: string;
   balances: Array<{ domain: number; depositor: string; balance: string }>;

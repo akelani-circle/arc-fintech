@@ -56,8 +56,19 @@ const DEBOUNCE_DELAY = 3000
 const FETCH_COOLDOWN = 5000
 
 type BalanceContextType = {
+  /**
+   * On-wallet USDC per chain (viem `balanceOf` against each USDC contract).
+   * These are funds the user has not yet deposited into Gateway.
+   */
   chainBalances: ChainBalances
+  /** Confirmed Gateway balance per chain. */
+  gatewayChainBalances: ChainBalances
+  /** Pending Gateway balance per chain. */
+  gatewayPendingChainBalances: ChainBalances
+  /** Total confirmed Gateway balance across all chains and wallets. */
   gatewayTotal: number
+  /** Total pending Gateway balance across all chains and wallets. */
+  gatewayPending: number
 
   walletBalances: Record<string, string>
   walletTotal: number
@@ -111,7 +122,14 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
   const [chainBalances, setChainBalances] = useState<ChainBalances>({
     ...EMPTY_CHAIN_BALANCES,
   })
+  const [gatewayChainBalances, setGatewayChainBalances] = useState<ChainBalances>({
+    ...EMPTY_CHAIN_BALANCES,
+  })
+  const [gatewayPendingChainBalances, setGatewayPendingChainBalances] = useState<ChainBalances>({
+    ...EMPTY_CHAIN_BALANCES,
+  })
   const [gatewayTotal, setGatewayTotal] = useState(0)
+  const [gatewayPending, setGatewayPending] = useState(0)
   const [isLoadingGateway, setIsLoadingGateway] = useState(true)
 
   const [walletBalances, setWalletBalances] = useState<Record<string, string>>({})
@@ -134,9 +152,14 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
 
   const loadGatewayBalance = useCallback(async (currentWallets: Wallet[]) => {
     try {
-      const { totals, grandTotal } = await fetchGatewayBalanceApi(currentWallets)
-      setChainBalances(totals)
-      setGatewayTotal(grandTotal)
+      const summary = await fetchGatewayBalanceApi(currentWallets)
+      // `totals` is on-wallet (un-deposited) USDC per chain via viem.
+      setChainBalances(summary.totals)
+      // `gatewayTotals` is confirmed Gateway balance per chain via App Kit.
+      setGatewayChainBalances(summary.gatewayTotals)
+      setGatewayPendingChainBalances(summary.gatewayPendingTotals)
+      setGatewayTotal(summary.grandTotal)
+      setGatewayPending(summary.pendingTotal)
       lastGatewayFetchRef.current = Date.now()
     } catch (error) {
       console.error("Error fetching gateway balance:", error)
@@ -340,6 +363,9 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
                 walletsRef.current = updated
                 if (updated.length === 0) {
                   setGatewayTotal(0)
+                  setGatewayPending(0)
+                  setGatewayChainBalances({ ...EMPTY_CHAIN_BALANCES })
+                  setGatewayPendingChainBalances({ ...EMPTY_CHAIN_BALANCES })
                   setWalletTotal(0)
                 }
                 return updated
@@ -413,7 +439,10 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
     <BalanceContext.Provider
       value={{
         chainBalances,
+        gatewayChainBalances,
+        gatewayPendingChainBalances,
         gatewayTotal,
+        gatewayPending,
         walletBalances,
         walletTotal,
         isLoadingGateway,
