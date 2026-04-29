@@ -18,12 +18,22 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
+import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: NextRequest) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { entityName } = await req.json();
 
-    if (!entityName.trim()) {
+    if (!entityName || !entityName.trim()) {
       return NextResponse.json(
         { error: "entityName is required" },
         { status: 400 }

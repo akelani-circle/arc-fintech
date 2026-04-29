@@ -43,12 +43,43 @@ export async function POST(req: NextRequest) {
 
     // Filter out null/undefined addresses and deduplicate (Gateway signer wallets share the same address across chains)
     const validAddresses = addresses.filter((addr: string | null | undefined) => addr != null && addr !== "");
-    const uniqueAddresses = Array.from(new Set(validAddresses.map((addr: string) => addr.toLowerCase())));
-    
-    if (uniqueAddresses.length === 0) {
+    const requestedAddresses = Array.from(new Set(validAddresses.map((addr: string) => addr.toLowerCase())));
+
+    if (requestedAddresses.length === 0) {
       return NextResponse.json(
         { error: "No valid addresses provided" },
         { status: 400 }
+      );
+    }
+
+    // CRITICAL: only return Gateway/on-chain balances for addresses the caller
+    // actually owns. Without this check any logged-in user can probe arbitrary
+    // addresses through our proxied SDK calls.
+    const { data: ownedRows, error: ownedErr } = await supabase
+      .from("wallets")
+      .select("address")
+      .eq("user_id", user.id)
+      .in("address", requestedAddresses);
+
+    if (ownedErr) {
+      console.error("Wallet ownership lookup failed:", ownedErr);
+      return NextResponse.json(
+        { error: "Failed to verify wallet ownership" },
+        { status: 500 }
+      );
+    }
+
+    const ownedSet = new Set(
+      (ownedRows ?? [])
+        .map((r) => (r.address ?? "").toLowerCase())
+        .filter((a) => a.length > 0)
+    );
+    const uniqueAddresses = requestedAddresses.filter((addr) => ownedSet.has(addr));
+
+    if (uniqueAddresses.length === 0) {
+      return NextResponse.json(
+        { error: "No matching wallets found for current user" },
+        { status: 404 }
       );
     }
 

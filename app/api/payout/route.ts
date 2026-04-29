@@ -19,7 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
-import { 
+import {
   signAndSubmitGatewayBurnIntent,
   executeGatewayMint,
   transferUnifiedBalanceCircle,
@@ -32,6 +32,7 @@ import {
   DOMAIN_IDS,
   USDC_ADDRESSES,
   GATEWAY_WALLET_ADDRESS,
+  PollingTimeoutError,
 } from "@/lib/circle/gateway-sdk";
 import { CHAIN_TO_USDC_ADDRESS } from "@/lib/constants/usdc-addresses";
 import type { Address, Hash } from "viem";
@@ -202,31 +203,6 @@ async function signBurnIntentCircle(
     console.error("Circle signTypedData error:", error?.response?.data || error);
     console.error("Data that failed:", finalData);
     throw error;
-  }
-}
-
-interface ChallengeResponse {
-  id: string;
-}
-
-async function waitForTransactionConfirmation(challengeId: string) {
-  while (true) {
-    const response = await circleDeveloperSdk.getTransaction({ id: challengeId });
-    const tx = response.data?.transaction;
-
-    if (tx?.state === "CONFIRMED" || tx?.state === "COMPLETE") {
-      console.log(`Transaction ${challengeId} reached terminal state '${tx.state}' with hash: ${tx.txHash}`);
-      if (!tx.txHash) {
-        throw new Error(`Transaction ${challengeId} is ${tx.state} but txHash is missing.`);
-      }
-      return tx;
-    } else if (tx?.state === "FAILED") {
-      console.error("Circle API Error:", tx);
-      throw new Error(`Transaction ${challengeId} failed with reason: ${tx.errorReason}`);
-    }
-
-    console.log(`Transaction ${challengeId} state: ${tx?.state}. Polling again in 2s...`);
-    await new Promise(resolve => setTimeout(resolve, 2000));
   }
 }
 
@@ -794,13 +770,29 @@ export async function POST(req: NextRequest) {
 
   } catch (error: any) {
     console.error("Payout error:", error);
-    
+
+    // If we hit our polling ceiling, the underlying transfer is still in flight
+    // upstream (Circle / Gateway). Surface a 202 so the client can poll for
+    // completion via /api/bridge/monitor or refresh, instead of a misleading 500.
+    if (error instanceof PollingTimeoutError) {
+      return NextResponse.json(
+        {
+          success: false,
+          status: "pending",
+          txId: error.challengeId,
+          message:
+            "Transfer accepted but did not finalize within the request window. It may still complete; check transaction status.",
+        },
+        { status: 202 }
+      );
+    }
+
     let errorMessage = "Internal server error";
     let userFriendlyMessage = "";
-    
+
     if (error.message) {
       errorMessage = error.message;
-      
+
       // Provide user-friendly messages for common errors
       if (errorMessage.includes("Insufficient native token")) {
         userFriendlyMessage = "The source wallet needs native tokens (gas) to pay for transaction fees. Please add native tokens to your wallet.";
@@ -812,11 +804,11 @@ export async function POST(req: NextRequest) {
         errorMessage = error.response.data.message;
       }
     }
-    
+
     return NextResponse.json(
-      { 
+      {
         error: errorMessage,
-        userMessage: userFriendlyMessage || errorMessage
+        userMessage: userFriendlyMessage || errorMessage,
       },
       { status: 500 }
     );

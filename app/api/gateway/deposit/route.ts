@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   initiateDepositFromCustodialWallet,
+  PollingTimeoutError,
   type SupportedChain,
 } from "@/lib/circle/gateway-sdk";
 import { createClient } from "@/lib/supabase/server";
@@ -137,6 +138,18 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("Error in deposit:", error);
 
+    if (error instanceof PollingTimeoutError) {
+      return NextResponse.json(
+        {
+          success: false,
+          status: "pending",
+          txId: error.challengeId,
+          message:
+            "Deposit submitted but did not finalize within the request window. It may still complete; refresh balances shortly.",
+        },
+        { status: 202 }
+      );
+    }
 
     let errorMessage = "Internal server error";
     let statusCode = 500;

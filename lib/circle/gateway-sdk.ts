@@ -39,14 +39,20 @@ import {
 export const GATEWAY_WALLET_ADDRESS = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
 export const GATEWAY_MINTER_ADDRESS = "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B";
 
-const arcRpcKey = process.env.ARC_TESTNET_RPC_KEY || 'c0ca2582063a5bbd5db2f98c139775e982b16919';
+// Arc Testnet RPC requires an API key. We intentionally do NOT ship a fallback
+// hardcoded key: a missing env var must fail loudly so we don't accidentally
+// commit a shared secret to source control.
+const arcRpcKey = process.env.ARC_TESTNET_RPC_KEY;
+const arcRpcUrl = arcRpcKey
+  ? `https://rpc.testnet.arc.network/${arcRpcKey}`
+  : "https://rpc.testnet.arc.network";
 
 export const arcTestnet = {
   id: 5042002,
   name: 'Arc Testnet',
   nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 6 },
   rpcUrls: {
-    default: { http: [`https://rpc.testnet.arc.network/${arcRpcKey}`] },
+    default: { http: [arcRpcUrl] },
   },
   blockExplorers: {
     default: { name: 'Explorer', url: 'https://explorer.arc.testnet.circle.com' },
@@ -190,10 +196,26 @@ interface ChallengeResponse {
   id: string;
 }
 
+/**
+ * Sentinel error thrown when polling exhausts its budget. Callers can catch
+ * this and surface a 202-pending response to the client instead of a 504.
+ */
+export class PollingTimeoutError extends Error {
+  constructor(public readonly challengeId: string, public readonly lastState?: string) {
+    super(`Transaction ${challengeId} did not reach terminal state in time (last state: ${lastState ?? "unknown"})`);
+    this.name = "PollingTimeoutError";
+  }
+}
+
+const POLL_INTERVAL_MS = 2000;
+const POLL_MAX_ATTEMPTS = 45; // 45 * 2s = 90s ceiling, well below typical 5min serverless limits
+
 async function waitForTransactionConfirmation(challengeId: string): Promise<Transaction> {
-  while (true) {
+  let lastState: string | undefined;
+  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
     const response = await circleDeveloperSdk.getTransaction({ id: challengeId });
     const tx = response.data?.transaction;
+    lastState = tx?.state;
 
     if (tx?.state === "CONFIRMED" || tx?.state === "COMPLETE") {
       console.log(`Transaction ${challengeId} reached terminal state '${tx.state}' with hash: ${tx.txHash}`);
@@ -206,9 +228,11 @@ async function waitForTransactionConfirmation(challengeId: string): Promise<Tran
       throw new Error(`Transaction ${challengeId} failed with reason: ${tx.errorReason}`);
     }
 
-    console.log(`Transaction ${challengeId} state: ${tx?.state}. Polling again in 2s...`);
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log(`Transaction ${challengeId} state: ${tx?.state}. Polling again in ${POLL_INTERVAL_MS}ms (${attempt + 1}/${POLL_MAX_ATTEMPTS})...`);
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
+
+  throw new PollingTimeoutError(challengeId, lastState);
 }
 
 async function initiateContractInteraction(
@@ -677,14 +701,16 @@ export async function transferUnifiedBalanceCircle(
   let finalSignature = attestationSignature;
 
   if (!finalAttestation || !finalSignature) {
-    while (true) {
-      await new Promise((r) => setTimeout(r, 3000)); // Wait 3s
+    const ATTESTATION_MAX_ATTEMPTS = 60; // 60 * 3s = 3min ceiling
+    let attempts = 0;
+    while (attempts < ATTESTATION_MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, 3000));
 
       const pollResponse = await fetch(`https://gateway-api-testnet.circle.com/v1/transfers/${transferId}`);
       const pollJson = await pollResponse.json();
       const status = pollJson.status || pollJson.state;
 
-      console.log(`Transfer Status: ${status}`);
+      console.log(`Transfer Status: ${status} (attempt ${attempts + 1}/${ATTESTATION_MAX_ATTEMPTS})`);
 
       if (pollJson.attestation && pollJson.signature) {
         finalAttestation = pollJson.attestation;
@@ -693,6 +719,11 @@ export async function transferUnifiedBalanceCircle(
       } else if (status === "FAILED") {
         throw new Error(`Transfer failed on Gateway: ${JSON.stringify(pollJson)}`);
       }
+      attempts++;
+    }
+
+    if (!finalAttestation || !finalSignature) {
+      throw new PollingTimeoutError(transferId, "attestation_pending");
     }
   }
 

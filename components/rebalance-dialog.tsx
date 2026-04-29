@@ -262,8 +262,15 @@ export function RebalanceDialog({ onClose }: RebalanceDialogProps) {
           onSelectWallet={setDestinationWallet}
           placeholder={!sourceWallet ? "Select source wallet first" : "Select destination wallet"}
           disabled={!sourceWallet || isRebalancing}
-          // Logic: Exclude the source wallet itself AND exclude the source chain (Cross-chain only)
-          excludeAddress={sourceWallet?.address}
+          // Cross-chain only: exclude the source wallet itself (by address+chain
+          // tuple, since Circle SCA wallets share the same address across chains)
+          // and exclude the source chain entirely so the destination is on a
+          // different chain.
+          excludeWallet={
+            sourceWallet
+              ? { address: sourceWallet.address, blockchain: sourceWallet.blockchain }
+              : undefined
+          }
           excludeChain={sourceWallet?.blockchain}
           excludeGatewaySigner={true}
         />
