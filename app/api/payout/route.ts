@@ -38,7 +38,10 @@ import {
   normalizeUnifiedBalanceGatewaySpendResult,
   planUnifiedBalanceGatewayAllocations,
 } from "@/lib/circle/unified-balance-payout";
-import { CHAIN_TO_USDC_ADDRESS } from "@/lib/constants/usdc-addresses";
+import {
+  getAppKitSendError,
+  sendUsdcOnSameChainWithAppKit,
+} from "@/lib/circle/app-kit-send";
 import {
   APP_KIT_CHAIN_BY_BLOCKCHAIN,
   type AppKitChain,
@@ -716,27 +719,35 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       txHash = mintTx.txHash as string;
       console.log(`Gateway transfer completed. Mint TX: ${txHash}`);
     } else {
-      // Same-chain transfer using direct USDC transfer
-      const usdcContractAddress = CHAIN_TO_USDC_ADDRESS[sourceWallet.blockchain];
-      if (!usdcContractAddress) {
+      try {
+        const sameChainSendResult = await sendUsdcOnSameChainWithAppKit({
+          sourceBlockchain: sourceWallet.blockchain,
+          sourceWalletAddress: sourceWallet.address,
+          recipientAddress,
+          amount: amountNum.toString(),
+        });
+
+        txId = sameChainSendResult.txId;
+        txHash = sameChainSendResult.txHash;
+
+        if (sameChainSendResult.estimatedFee) {
+          const parsedEstimatedFee = Number.parseFloat(
+            sameChainSendResult.estimatedFee
+          );
+          if (Number.isFinite(parsedEstimatedFee)) {
+            estimatedFee = parsedEstimatedFee;
+          }
+        }
+      } catch (error) {
+        const mappedError = getAppKitSendError(error);
         return NextResponse.json(
-          { error: `USDC contract not found for ${sourceWallet.blockchain}` },
-          { status: 400 }
+          {
+            error: mappedError.error,
+            userMessage: mappedError.userMessage,
+          },
+          { status: mappedError.status }
         );
       }
-
-      const response = await circleDeveloperSdk.createContractExecutionTransaction({
-        walletId: sourceWallet.walletId,
-        contractAddress: usdcContractAddress,
-        abiFunctionSignature: "transfer(address,uint256)",
-        abiParameters: [recipientAddress, amountInAtomicUnits.toString()],
-        fee: { type: "level", config: { feeLevel: "HIGH" } },
-      });
-
-      if (!response.data?.id) {
-        throw new Error("Failed to initiate transfer");
-      }
-      txId = response.data.id;
     }
 
     // Log transaction

@@ -18,10 +18,12 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
-import { CHAIN_TO_USDC_ADDRESS } from "@/lib/constants/usdc-addresses";
 import { validateJsonBody, evmAddressSchema } from "@/lib/api/validate";
 import { withAuth } from "@/lib/api/with-auth";
+import {
+  getAppKitSendError,
+  sendUsdcOnSameChainWithAppKit,
+} from "@/lib/circle/app-kit-send";
 
 const bodySchema = z.object({
   sourceWalletId: z.string().min(1),
@@ -31,12 +33,6 @@ const bodySchema = z.object({
     .transform((v) => (typeof v === "string" ? Number(v) : v))
     .refine((n) => Number.isFinite(n) && n > 0, "Amount must be positive"),
 });
-
-// Convert USDC (6 decimals) to atomic units. Use Math.round to avoid losing
-// the trailing penny on values like 0.000001 due to FP error.
-function convertToSmallestUnit(amount: number): string {
-  return BigInt(Math.round(amount * 1_000_000)).toString();
-}
 
 export const POST = withAuth(async (req, { user, supabase }) => {
   try {
@@ -61,37 +57,12 @@ export const POST = withAuth(async (req, { user, supabase }) => {
 
     const amountNum = amount;
 
-    // 2. Get the USDC contract address for the source wallet's chain
-    const usdcContractAddress = CHAIN_TO_USDC_ADDRESS[sourceWallet.blockchain];
-
-    if (!usdcContractAddress) {
-      return NextResponse.json(
-        { error: `USDC contract not found for chain: ${sourceWallet.blockchain}` },
-        { status: 400 }
-      );
-    }
-
-    const response = await circleDeveloperSdk.createContractExecutionTransaction({
-      walletId: sourceWalletId,
-      contractAddress: usdcContractAddress,
-      abiFunctionSignature: "transfer(address,uint256)",
-      abiParameters: [
-        destinationAddress,
-        convertToSmallestUnit(amount),
-      ],
-      fee: {
-        type: "level",
-        config: {
-          feeLevel: "HIGH",
-        },
-      },
+    const sendResult = await sendUsdcOnSameChainWithAppKit({
+      sourceBlockchain: sourceWallet.blockchain,
+      sourceWalletAddress: sourceWallet.address,
+      recipientAddress: destinationAddress,
+      amount: amount.toString(),
     });
-
-    const transactionData = response.data;
-
-    if (!transactionData?.id) {
-      throw new Error("Failed to initiate transfer with Circle API.");
-    }
 
     // 4. Log to Transactions Table
     const { error: insertError } = await supabase.from("transactions").insert([
@@ -100,7 +71,8 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         amount: amountNum,
         sender_address: sourceWallet.address,
         recipient_address: destinationAddress,
-        circle_transaction_id: transactionData.id,
+        tx_hash: sendResult.txHash ?? null,
+        circle_transaction_id: sendResult.txId,
         blockchain: sourceWallet.blockchain,
         type: "OUTBOUND",
         status: "PENDING",
@@ -113,29 +85,20 @@ export const POST = withAuth(async (req, { user, supabase }) => {
 
     return NextResponse.json({
       success: true,
-      txId: transactionData.id,
+      txId: sendResult.txId,
+      txHash: sendResult.txHash ?? null,
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Transfer error:", error);
-    
-    // Log detailed error information
-    if (error?.response?.data) {
-      console.error("Circle API error details:", JSON.stringify(error.response.data, null, 2));
-    }
-
-    let errorMessage = "Internal server error";
-    if (error?.response?.data?.message) {
-      errorMessage = error.response.data.message;
-    } else if (error?.response?.data?.error) {
-      errorMessage = error.response.data.error;
-    } else if (error instanceof Error) {
-      errorMessage = error.message;
-    }
+    const mappedError = getAppKitSendError(error);
 
     return NextResponse.json(
-      { error: errorMessage },
-      { status: 500 }
+      {
+        error: mappedError.error,
+        userMessage: mappedError.userMessage,
+      },
+      { status: mappedError.status }
     );
   }
 });
