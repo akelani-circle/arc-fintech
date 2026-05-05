@@ -64,12 +64,16 @@ export function getAppKit(): AppKit {
   return cachedAppKit
 }
 
+export function createCircleWalletsAdapterInstance(): CircleWalletsAdapter {
+  return createCircleWalletsAdapter({
+    apiKey: requireEnv("CIRCLE_API_KEY"),
+    entitySecret: requireEnv("CIRCLE_ENTITY_SECRET"),
+  })
+}
+
 export function getCircleWalletsAdapter(): CircleWalletsAdapter {
   if (!cachedAdapter) {
-    cachedAdapter = createCircleWalletsAdapter({
-      apiKey: requireEnv("CIRCLE_API_KEY"),
-      entitySecret: requireEnv("CIRCLE_ENTITY_SECRET"),
-    })
+    cachedAdapter = createCircleWalletsAdapterInstance()
   }
   return cachedAdapter
 }

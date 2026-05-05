@@ -393,7 +393,7 @@ export function SendButton() {
                 )}
                 {sourceType === "gateway" && (
                   <p className="text-xs text-muted-foreground">
-                    Use unified Gateway balance across all chains
+                    Use unified Gateway balance with Forwarding Service execution
                   </p>
                 )}
               </div>
