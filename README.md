@@ -2,7 +2,7 @@
 
 Modern multi-chain treasury management system. This sample application uses Next.js, Supabase, and Circle Developer Controlled Wallets, Circle Gateway and Circle Bridge Kit with Forwarding Service to demonstrate a multi-chain treasury management system with bridge capabilities.
 
-<img width="830" height="467" alt="Fintech Starter App dashboard" src="public/screenshot.png" />
+<img alt="Fintech Starter App dashboard" src="public/screenshot.png" />
 
 ## Table of Contents
 
