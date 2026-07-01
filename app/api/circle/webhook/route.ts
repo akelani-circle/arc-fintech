@@ -21,7 +21,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 // Fail fast at module load if the webhook's required env vars aren't
-// configured. This is a service-role + public-URL pair: missing either
+// configured. This is a secret-key + public-URL pair: missing either
 // silently turned dedupe insertions into runtime errors, which is much
 // harder to debug than refusing to boot.
 function requireEnv(name: string): string {
@@ -33,9 +33,9 @@ function requireEnv(name: string): string {
 }
 
 const SUPABASE_URL = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
-const SUPABASE_SERVICE_ROLE_KEY = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+const SUPABASE_SECRET_KEY = requireEnv("SUPABASE_SECRET_KEY");
 
-const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
   auth: {
     autoRefreshToken: false,
     persistSession: false,

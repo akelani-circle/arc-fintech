@@ -107,8 +107,8 @@ Copy `.env.example` to `.env.local` and fill in the required values:
 ```bash
 # Supabase
 NEXT_PUBLIC_SUPABASE_URL=your-project-url
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-or-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+SUPABASE_SECRET_KEY=your-secret-key
 
 # Circle
 CIRCLE_API_KEY=your-circle-api-key
@@ -125,8 +125,8 @@ ARC_TESTNET_RPC_KEY=
 | Variable | Scope | Purpose |
 | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Public | Supabase project URL. |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Public | Supabase anonymous/publishable key. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-side | Supabase service role key for admin operations. |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Public | Supabase publishable key. |
+| `SUPABASE_SECRET_KEY` | Server-side | Supabase secret key for admin operations. |
 | `CIRCLE_API_KEY` | Server-side | Circle API key for wallet operations. |
 | `CIRCLE_ENTITY_SECRET` | Server-side | Circle entity secret for signing transactions. |
 | `WEBHOOK_ENDPOINT_URL` | Server-side | Public HTTPS URL Circle posts notifications to (e.g. your ngrok tunnel + `/api/circle/webhook`). Used to create/sync the standard and Gateway webhook subscriptions. If unset, falls back to `${NEXT_PUBLIC_APP_URL}/api/circle/webhook` and registration is skipped when neither is set. |

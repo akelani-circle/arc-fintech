@@ -21,7 +21,7 @@ namespace NodeJS {
     // Supabase
     NEXT_PUBLIC_SUPABASE_URL: string
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: string
-    SUPABASE_SERVICE_ROLE_KEY: string
+    SUPABASE_SECRET_KEY: string
 
     // Circle
     CIRCLE_API_KEY: string
@@ -29,5 +29,10 @@ namespace NodeJS {
 
     // Arc Testnet RPC (optional but recommended; falls back to public endpoint).
     ARC_TESTNET_RPC_KEY?: string
+
+    // EarnKit Kit Key (optional). When set, EarnKit runs in permissioned mode
+    // with integrator attribution + higher rate limits; otherwise permissionless.
+    // Format: KIT_KEY:<keyId>:<keySecret>
+    EARN_KIT_KEY?: string
   }
 }
