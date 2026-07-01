@@ -62,36 +62,9 @@ function requireEnv(name: string): string {
 export function getEarnKit(): EarnKit {
   if (!cachedKit) {
     cachedKit = new EarnKit()
-    attachEarnDebugLogger(cachedKit)
   }
   return cachedKit
 }
-
-// --- DEBUG: earn step logger (remove this block to revert) ----------------
-// Gated behind EARN_DEBUG=1. Logs every multi-phase step EarnKit emits
-// (fetchParams -> approve -> execute) so we can see exactly which phase fails
-// and its on-chain txHash / errorMessage. Delete this function and its call in
-// getEarnKit() to fully remove. https://api.circle.com EarnService deposit
-// failures (code 8001) surface here as an `execute` step with state "error".
-function attachEarnDebugLogger(kit: EarnKit): void {
-  if (process.env.EARN_DEBUG !== "1") return
-  kit.on("*", (payload) => {
-    const v = payload.values as {
-      name: string
-      state: string
-      txHash?: string
-      errorMessage?: string
-    }
-    const parts = [
-      `[earn-debug] ${payload.operation}/${payload.method}`,
-      `${v.name}=${v.state}`,
-    ]
-    if (v.txHash) parts.push(`tx=${v.txHash}`)
-    if (v.errorMessage) parts.push(`err="${v.errorMessage}"`)
-    console.log(parts.join(" "))
-  })
-}
-// --- END DEBUG ------------------------------------------------------------
 
 function createEarnAdapter(): CircleWalletsAdapter {
   return createCircleWalletsAdapter({

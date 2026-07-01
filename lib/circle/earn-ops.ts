@@ -32,7 +32,7 @@ import {
   type EarnAssetAmount,
   type EarnGasFeeEstimate,
 } from "@circle-fin/earn-kit"
-import { getEarnError, isNoPositionError, isArcTxParamsBug } from "@/lib/earn/errors"
+import { getEarnError, isNoPositionError } from "@/lib/earn/errors"
 import {
   getEarnKit,
   earnFromContext,
@@ -48,6 +48,8 @@ import type {
   EarnGasFee,
   EarnWriteResult,
 } from "@/lib/earn/types"
+import { createPublicClient, http, formatUnits, type Address } from "viem"
+import { arcTestnet } from "@/lib/circle/gateway-sdk"
 
 export interface ExploreFilters {
   protocol?: string
@@ -83,6 +85,41 @@ function mapVault(v: EarnVaultInfo): EarnVault {
       supplyUsd: c.supplyUsd,
     })),
     warnings: (v.warnings ?? []).map((w) => ({ type: w.type, level: w.level })),
+  }
+}
+
+/** Arc USDC (the vaults' underlying asset) has 6 decimals. */
+const USDC_DECIMALS = 6
+
+const ERC4626_TOTAL_ASSETS_ABI = [
+  {
+    type: "function",
+    name: "totalAssets",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint256" }],
+  },
+] as const
+
+/**
+ * The mock Arc Testnet vaults report a hardcoded `totalDeposits: "0"` from
+ * EarnService even though they hold real USDC on-chain, so when the SDK value
+ * is 0 we fall back to the vault's ERC-4626 `totalAssets()`. Real vaults report
+ * a non-zero figure and are left untouched. Best-effort: a failed read keeps
+ * the SDK value rather than breaking the page.
+ */
+async function withOnChainTotalDeposits(vault: EarnVault): Promise<EarnVault> {
+  if (Number(vault.totalDeposits) > 0) return vault
+  try {
+    const client = createPublicClient({ chain: arcTestnet, transport: http() })
+    const raw = await client.readContract({
+      address: vault.vaultAddress as Address,
+      abi: ERC4626_TOTAL_ASSETS_ABI,
+      functionName: "totalAssets",
+    })
+    return { ...vault, totalDeposits: formatUnits(raw, USDC_DECIMALS) }
+  } catch {
+    return vault
   }
 }
 
@@ -143,13 +180,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
       return await fn()
     } catch (error) {
       lastError = error
-      // The Arc tx-params bug is tagged RETRYABLE but is deterministic - bail
-      // immediately instead of wasting the full retry budget on it.
-      if (
-        !isRetryableError(error) ||
-        isArcTxParamsBug(error) ||
-        attempt === RETRY_ATTEMPTS - 1
-      )
+      if (!isRetryableError(error) || attempt === RETRY_ATTEMPTS - 1)
         throw error
       await new Promise((resolve) =>
         setTimeout(resolve, RETRY_BASE_DELAY_MS * (attempt + 1))
@@ -182,7 +213,9 @@ export async function exploreEarnVaults(filters: ExploreFilters): Promise<{
     })
   )
   return {
-    vaults: result.vaults.map(mapVault),
+    vaults: await Promise.all(
+      result.vaults.map((v) => withOnChainTotalDeposits(mapVault(v)))
+    ),
     pagination: result.pagination,
   }
 }
@@ -197,7 +230,7 @@ export async function getEarnVault(
     })
   )
   const vault = result.vaults[0]
-  return vault ? mapVault(vault) : null
+  return vault ? await withOnChainTotalDeposits(mapVault(vault)) : null
 }
 
 export async function getEarnPosition(

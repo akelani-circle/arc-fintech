@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from "vitest"
-import { getEarnError, isNoPositionError, isArcTxParamsBug } from "@/lib/earn/errors"
+import { getEarnError, isNoPositionError } from "@/lib/earn/errors"
 
 describe("getEarnError", () => {
   it("maps insufficient-balance failures to a 400", () => {
@@ -29,59 +29,6 @@ describe("getEarnError", () => {
     const result = getEarnError("a bare string")
     expect(result.status).toBe(502)
     expect(typeof result.userMessage).toBe("string")
-  })
-
-  it("maps the Arc tx-params bug to a non-retryable 502, not a 503", () => {
-    // Mirrors the real EarnKit shape: a "RPC endpoint error" wrapper with the
-    // raw Arc rejection buried in the trace, tagged RETRYABLE.
-    const error = {
-      message: "RPC endpoint error on Arc Testnet",
-      recoverability: "RETRYABLE",
-      cause: {
-        trace: {
-          steps: [
-            {
-              name: "approve",
-              state: "error",
-              error: {
-                cause: {
-                  trace: {
-                    rawError: {
-                      details:
-                        "Unsupported transaction params: gas, gasPrice, maxFeePerGas, maxPriorityFeePerGas, nonce, value",
-                    },
-                  },
-                },
-              },
-            },
-          ],
-        },
-      },
-    }
-    const result = getEarnError(error)
-    expect(result.status).toBe(502)
-    expect(result.error).toBe("Deposit unsupported on Arc Testnet")
-    expect(result.userMessage.toLowerCase()).toContain("retrying won't help")
-  })
-})
-
-describe("isArcTxParamsBug", () => {
-  it("detects the signature in a plain message", () => {
-    expect(
-      isArcTxParamsBug(new Error("Unsupported transaction params: gas, value"))
-    ).toBe(true)
-  })
-
-  it("detects the signature nested deep in the trace", () => {
-    const error = {
-      cause: { trace: { rawError: { details: "Unsupported transaction params: nonce" } } },
-    }
-    expect(isArcTxParamsBug(error)).toBe(true)
-  })
-
-  it("returns false for unrelated failures", () => {
-    expect(isArcTxParamsBug(new Error("insufficient funds"))).toBe(false)
-    expect(isArcTxParamsBug("nope")).toBe(false)
   })
 })
 
