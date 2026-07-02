@@ -22,7 +22,7 @@ import * as React from "react"
 import { IconLoader } from "@tabler/icons-react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -95,9 +95,9 @@ export function NewWalletDialog({
   })
 
   // Watch fields to disable button if empty
-  const name = walletCreationForm.watch("name")
-  const chain = walletCreationForm.watch("chain")
-  const type = walletCreationForm.watch("type")
+  const name = useWatch({ control: walletCreationForm.control, name: "name" })
+  const chain = useWatch({ control: walletCreationForm.control, name: "chain" })
+  const type = useWatch({ control: walletCreationForm.control, name: "type" })
 
   // This effect listens for changes in the 'open' prop.
   // Whenever the dialog closes (open becomes false), we reset the form.

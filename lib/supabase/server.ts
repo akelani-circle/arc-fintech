@@ -16,8 +16,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
+
+interface CookieStore {
+  getAll: () => Array<{ name: string; value: string }>;
+  set: (name: string, value: string, options?: CookieOptions) => void;
+}
 
 /**
  * Especially important if using Fluid compute: Don't put this client in a
@@ -25,10 +30,10 @@ import { cookies } from "next/headers";
  * it.
  */
 export async function createClient() {
-  let cookieStore: any;
+  let cookieStore: CookieStore;
   try {
-    cookieStore = await cookies();
-  } catch (error) {
+    cookieStore = (await cookies()) as unknown as CookieStore;
+  } catch {
     // Fallback during build where cookies() may reject
     cookieStore = {
       getAll: () => [],
@@ -44,9 +49,9 @@ export async function createClient() {
         getAll() {
           return cookieStore.getAll();
         },
-        setAll(cookiesToSet: any[]) {
+        setAll(cookiesToSet: { name: string; value: string; options?: CookieOptions }[]) {
           try {
-            cookiesToSet.forEach(({ name, value, options }: any) =>
+            cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options),
             );
           } catch {

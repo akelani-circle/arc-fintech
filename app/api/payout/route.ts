@@ -18,6 +18,7 @@
 
 import { NextResponse } from "next/server";
 import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
+import type { Blockchain } from "@circle-fin/developer-controlled-wallets";
 import { withAuth } from "@/lib/api/with-auth";
 import {
   signAndSubmitGatewayBurnIntent,
@@ -574,7 +575,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       // Find or create a Circle wallet on the destination chain
       const destinationBlockchain = CHAIN_TO_BLOCKCHAIN[destinationChain];
       
-      let { data: circleWallets, error: circleWalletError } = await supabase
+      const { data: circleWallets } = await supabase
         .from("wallets")
         .select("*")
         .eq("user_id", user.id)
@@ -613,7 +614,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
           
           // Create Circle wallet using the same wallet set
           const walletResponse = await circleDeveloperSdk.createWallets({
-            blockchains: [destinationBlockchain as any],
+            blockchains: [destinationBlockchain as Blockchain],
             count: 1,
             walletSetId,
           });
@@ -652,13 +653,13 @@ export const POST = withAuth(async (req, { user, supabase }) => {
 
           circleWallet = dbWallet;
           console.log(`✅ Auto-created Circle wallet on ${destinationChain}: ${newWallet.address}`);
-        } catch (error: any) {
+        } catch (error) {
           console.error("Failed to auto-create Circle wallet:", error);
           return NextResponse.json(
-            { 
+            {
               error: "Failed to create wallet on destination chain",
               userMessage: `Could not automatically create a wallet on ${CHAIN_LABELS[destinationChain]}. Please try creating one manually. The burn intent has been submitted (Transfer ID: ${transferId}).`,
-              details: error.message
+              details: error instanceof Error ? error.message : String(error)
             },
             { status: 500 }
           );
@@ -678,9 +679,10 @@ export const POST = withAuth(async (req, { user, supabase }) => {
           attestation,
           attestationSignature
         );
-      } catch (mintError: any) {
+      } catch (mintError) {
+        const mintErrorMessage = mintError instanceof Error ? mintError.message : String(mintError);
         // Check if it's a gas error
-        if (mintError.message.includes('insufficient') || mintError.message.includes('native tokens')) {
+        if (mintErrorMessage.includes('insufficient') || mintErrorMessage.includes('native tokens')) {
           return NextResponse.json(
             { 
               success: false,
@@ -784,7 +786,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       },
     });
 
-  } catch (error: any) {
+  } catch (error) {
     console.error("Payout error:", error);
 
     // If we hit our polling ceiling, the underlying transfer is still in flight
@@ -806,7 +808,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
     let errorMessage = "Internal server error";
     let userFriendlyMessage = "";
 
-    if (error.message) {
+    if (error instanceof Error && error.message) {
       errorMessage = error.message;
 
       // Provide user-friendly messages for common errors
@@ -816,8 +818,12 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         userFriendlyMessage = "Not enough USDC balance across all your wallets to complete this transfer.";
       } else if (errorMessage.includes("No wallets found")) {
         userFriendlyMessage = "You don't have any wallets yet. Please create a wallet first.";
-      } else if (error?.response?.data?.message) {
-        errorMessage = error.response.data.message;
+      } else {
+        const responseMessage = (error as { response?: { data?: { message?: string } } })
+          .response?.data?.message;
+        if (responseMessage) {
+          errorMessage = responseMessage;
+        }
       }
     }
 

@@ -19,7 +19,7 @@
 "use client";
 
 import { useState } from "react";
-import { IconRefresh, IconChevronDown } from "@tabler/icons-react";
+import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -46,7 +46,7 @@ export function RebalanceButton() {
         <DialogHeader>
           <DialogTitle>Rebalance Funds</DialogTitle>
           <DialogDescription>
-            Bridge USDC across chains using Circle's Bridge Kit
+            Bridge USDC across chains using Circle&apos;s Bridge Kit
           </DialogDescription>
         </DialogHeader>
         <RebalanceDialog onClose={() => setOpen(false)} />

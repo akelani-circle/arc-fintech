@@ -61,7 +61,7 @@ interface ChartLineInteractiveProps {
   className?: string
   title?: string
   description?: string
-  data: Record<string, any>[]
+  data: Record<string, string | number>[]
   config?: ChartConfig
 }
 
@@ -75,11 +75,15 @@ export function ChartLineInteractive({
   const isMobile = useIsMobile()
   const [timeRange, setTimeRange] = React.useState("90d")
 
-  React.useEffect(() => {
+  // Collapse to a 7d range when the viewport becomes mobile. Handled during
+  // render (adjust-on-change) rather than an effect.
+  const [prevIsMobile, setPrevIsMobile] = React.useState(isMobile)
+  if (isMobile !== prevIsMobile) {
+    setPrevIsMobile(isMobile)
     if (isMobile) {
       setTimeRange("7d")
     }
-  }, [isMobile])
+  }
 
   const filteredData = React.useMemo(() => {
     if (!data || data.length === 0) return []

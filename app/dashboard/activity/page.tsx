@@ -71,21 +71,18 @@ type SortConfig = {
 function ActivityContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [activities, setActivities] = React.useState<ActivityItem[]>([])
-  const [loading, setLoading] = React.useState(true)
-  
+  const [filter, setFilter] = React.useState(searchParams.get("search") || "")
 
-const [filter, setFilter] = React.useState(searchParams.get("search") || "")
-
-React.useEffect(() => {
-  const initialSearch = searchParams.get("search")
-  if (initialSearch) {
-    setFilter(initialSearch)
-    const params = new URLSearchParams(searchParams.toString())
-    params.delete("search")
-    router.replace(`/dashboard/activity?${params.toString()}`)
-  }
-}, [searchParams, router])
+  // `filter` is already seeded from the `?search=` param above; this effect
+  // only strips the param back out of the URL. No state is set here.
+  React.useEffect(() => {
+    const initialSearch = searchParams.get("search")
+    if (initialSearch) {
+      const params = new URLSearchParams(searchParams.toString())
+      params.delete("search")
+      router.replace(`/dashboard/activity?${params.toString()}`)
+    }
+  }, [searchParams, router])
   const [currentPage, setCurrentPage] = React.useState(1)
   const [sortConfig, setSortConfig] = React.useState<SortConfig>({
     key: "timestamp",
@@ -94,12 +91,12 @@ React.useEffect(() => {
 
   const { fullWallets, transactions, isLoadingData } = useBalanceContext()
 
-  // Derive activity items from the shared context's wallets+transactions.
-  // No standalone fetch — the BalanceProvider's Realtime channel keeps these
-  // in sync.
-  React.useEffect(() => {
-    setLoading(isLoadingData)
+  const loading = isLoadingData
 
+  // Activity items are a pure derivation of the shared context's
+  // wallets+transactions. No standalone fetch/state — the BalanceProvider's
+  // Realtime channel keeps the source data in sync.
+  const activities = React.useMemo<ActivityItem[]>(() => {
     const walletActivities: ActivityItem[] = fullWallets.map((w) => ({
       id: `create-${w.id}`,
       type: "wallet_created",
@@ -139,8 +136,8 @@ React.useEffect(() => {
       }
     })
 
-    setActivities([...walletActivities, ...transactionActivities])
-  }, [fullWallets, transactions, isLoadingData])
+    return [...walletActivities, ...transactionActivities]
+  }, [fullWallets, transactions])
 
   const handleSort = (key: "amount" | "timestamp") => {
     setSortConfig((current) => {
@@ -192,9 +189,13 @@ React.useEffect(() => {
     return sortedActivities.slice(start, start + ITEMS_PER_PAGE)
   }, [sortedActivities, currentPage])
 
-  React.useEffect(() => {
+  // Reset to the first page when the filter changes. Done during render
+  // (React's "adjust state when a value changes" pattern) instead of an effect.
+  const [prevFilter, setPrevFilter] = React.useState(filter)
+  if (prevFilter !== filter) {
+    setPrevFilter(filter)
     setCurrentPage(1)
-  }, [filter])
+  }
 
   const getTypeBadge = (type: ActivityItem["type"]) => {
     switch (type) {
@@ -209,7 +210,7 @@ React.useEffect(() => {
     }
   }
 
-  const SortIcon = ({ columnKey }: { columnKey: "amount" | "timestamp" }) => {
+  const sortIcon = (columnKey: "amount" | "timestamp") => {
     if (sortConfig.key !== columnKey) return <IconArrowsSort className="ml-2 h-4 w-4" />
     if (sortConfig.direction === "asc") return <IconArrowUp className="ml-2 h-4 w-4" />
     return <IconArrowDown className="ml-2 h-4 w-4" />
@@ -243,7 +244,7 @@ React.useEffect(() => {
                   className="hover:bg-transparent p-0 font-medium"
                 >
                   Amount
-                  <SortIcon columnKey="amount" />
+                  {sortIcon("amount")}
                 </Button>
               </TableHead>
               <TableHead className="text-right">
@@ -253,7 +254,7 @@ React.useEffect(() => {
                   className="hover:bg-transparent p-0 font-medium"
                 >
                   Date
-                  <SortIcon columnKey="timestamp" />
+                  {sortIcon("timestamp")}
                 </Button>
               </TableHead>
             </TableRow>

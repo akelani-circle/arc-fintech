@@ -29,6 +29,26 @@ import { withAuth } from "@/lib/api/with-auth";
 // and any longer outcome is reported back via webhook + the tx row update.
 export const maxDuration = 60;
 
+interface AppKitError {
+  message?: string;
+  code?: number;
+  type?: string;
+}
+
+interface TxHashPayload {
+  txHash?: string;
+  values?: {
+    txHash?: string;
+    forwardTxHash?: string;
+    attestation?: { forwardTxHash?: string };
+  };
+  data?: {
+    txHash?: string;
+    forwardTxHash?: string;
+    attestation?: { forwardTxHash?: string };
+  };
+}
+
 const bodySchema = z.object({
   sourceWalletId: z.string().min(1),
   sourceChain: blockchainSchema,
@@ -140,14 +160,16 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       
       // Check if estimate has any fee errors
       if (estimateResult.fees && Array.isArray(estimateResult.fees)) {
-        const feeErrors = estimateResult.fees.filter((fee: any) => fee.error);
+        const feeErrors = estimateResult.fees.filter((fee) => fee.error);
         if (feeErrors.length > 0) {
-          const errorMsg = feeErrors.map((f: any) => f.error.message).join('; ');
+          const errorMsg = feeErrors
+            .map((f) => (f.error as { message?: string })?.message)
+            .join('; ');
           throw new Error(`Fee estimation failed: ${errorMsg}`);
         }
 
         estimatedBridgeFee = estimateResult.fees.reduce(
-          (total: number, fee: any) => {
+          (total, fee) => {
             if (fee.token !== "USDC") return total;
             const parsedFee = Number(fee.amount);
             return Number.isFinite(parsedFee) ? total + parsedFee : total;
@@ -157,30 +179,31 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       }
       
       console.log("Transfer parameters validated successfully");
-    } catch (validationError: any) {
+    } catch (validationError) {
       console.error("Transfer validation failed:", validationError);
-      
+
+      const vErr = validationError as AppKitError;
       // Parse error type and provide user-friendly message
       let errorMessage = "Transfer validation failed";
-      let errorDetails = validationError.message || "Unknown error";
-      
-      if (validationError.code === 9002 || validationError.type === 'BALANCE') {
+      let errorDetails = vErr.message || "Unknown error";
+
+      if (vErr.code === 9002 || vErr.type === 'BALANCE') {
         errorMessage = "Insufficient gas";
         errorDetails = `Not enough native currency to pay source-chain gas fees. Please fund the source wallet on ${sourceChain}.`;
-      } else if (validationError.code === 9001 || validationError.message?.includes('Insufficient balance')) {
+      } else if (vErr.code === 9001 || vErr.message?.includes('Insufficient balance')) {
         errorMessage = "Insufficient USDC balance";
         errorDetails = `Not enough USDC in the source wallet to complete the transfer.`;
-      } else if (validationError.type === 'INPUT') {
+      } else if (vErr.type === 'INPUT') {
         errorMessage = "Invalid transfer parameters";
-        errorDetails = validationError.message;
+        errorDetails = vErr.message || "Unknown error";
       }
-      
+
       return NextResponse.json(
-        { 
+        {
           error: errorMessage,
           message: errorDetails,
-          code: validationError.code,
-          type: validationError.type,
+          code: vErr.code,
+          type: vErr.type,
         },
         { status: 400 }
       );
@@ -216,14 +239,14 @@ export const POST = withAuth(async (request, { user, supabase }) => {
     // attestation -> mint, so on success the row is COMPLETE before we
     // return; on a transient timeout we surface 202 PENDING and the row
     // stays PENDING for the webhook / monitor poll to advance.
-    const serializeBigInt = (obj: any): any => {
+    const serializeBigInt = (obj: unknown): unknown => {
       if (obj === null || obj === undefined) return obj;
       if (typeof obj === "bigint") return obj.toString();
       if (Array.isArray(obj)) return obj.map(serializeBigInt);
       if (typeof obj === "object") {
-        const serialized: any = {};
+        const serialized: Record<string, unknown> = {};
         for (const key in obj) {
-          serialized[key] = serializeBigInt(obj[key]);
+          serialized[key] = serializeBigInt((obj as Record<string, unknown>)[key]);
         }
         return serialized;
       }
@@ -232,17 +255,34 @@ export const POST = withAuth(async (request, { user, supabase }) => {
 
     let burnTxHash: string | null = null;
     let mintTxHash: string | null = null;
-    const extractTxHash = (payload: any): string | null =>
-      payload?.values?.txHash ??
-      payload?.txHash ??
-      payload?.data?.txHash ??
-      payload?.values?.forwardTxHash ??
-      payload?.data?.forwardTxHash ??
-      payload?.values?.attestation?.forwardTxHash ??
-      payload?.data?.attestation?.forwardTxHash ??
-      null;
+    const extractTxHash = (payload: unknown): string | null => {
+      const p = payload as TxHashPayload | null | undefined;
+      return (
+        p?.values?.txHash ??
+        p?.txHash ??
+        p?.data?.txHash ??
+        p?.values?.forwardTxHash ??
+        p?.data?.forwardTxHash ??
+        p?.values?.attestation?.forwardTxHash ??
+        p?.data?.attestation?.forwardTxHash ??
+        null
+      );
+    };
 
-    kit.on("bridge.burn", async (payload: any) => {
+    // Resolves as soon as the source-chain burn is broadcast. Once the burn is
+    // on-chain, CCTP + the forwarder complete the transfer server-side at
+    // Circle independently of this HTTP request, and the destination-mint
+    // webhook reconciles the row to COMPLETE (see app/api/webhooks/circle).
+    // So we can respond the moment the burn lands instead of blocking the whole
+    // request on FAST/forwarder settlement (1-3 min) — which is what left the
+    // rebalance dialog spinning indefinitely under `next dev`, where the
+    // maxDuration budget isn't enforced.
+    let signalBurn: () => void = () => {};
+    const burnBroadcast = new Promise<void>((resolve) => {
+      signalBurn = resolve;
+    });
+
+    kit.on("bridge.burn", async (payload) => {
       const hash = extractTxHash(payload);
       if (hash && !burnTxHash) {
         burnTxHash = hash;
@@ -250,16 +290,23 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           .from("transactions")
           .update({ tx_hash: burnTxHash, status: "PENDING" })
           .eq("id", txData.id);
+        signalBurn();
       }
     });
 
-    kit.on("bridge.mint", async (payload: any) => {
+    kit.on("bridge.mint", async (payload) => {
       const hash = extractTxHash(payload);
       if (hash) mintTxHash = hash;
     });
 
-    try {
-      const result = await kit.bridge({
+    // Run the bridge to completion in the background. Its resolution updates the
+    // row to its terminal state and is best-effort: in a serverless deploy the
+    // function may be frozen after we respond, in which case the webhook is the
+    // source of truth. Handlers are attached here (not a bare await) so an
+    // eventual rejection after we've already responded can't surface as an
+    // unhandled promise rejection.
+    const settlement = kit
+      .bridge({
         from: {
           adapter,
           chain: bridgeSourceChain,
@@ -270,37 +317,97 @@ export const POST = withAuth(async (request, { user, supabase }) => {
         config: {
           transferSpeed: transferSpeed as "FAST" | "SLOW",
         },
+      })
+      .then(async (result) => {
+        if (!burnTxHash && result.steps && Array.isArray(result.steps)) {
+          const burnStep = result.steps.find((step) => step.name === "burn");
+          burnTxHash = extractTxHash(burnStep);
+        }
+
+        // Forwarder-only destinations may surface completion hash on mint or
+        // attestation-oriented steps instead of a traditional destination mint.
+        if (!mintTxHash && result.steps && Array.isArray(result.steps)) {
+          const forwarderStep = result.steps.find((step) =>
+            ["mint", "fetchAttestation", "reAttest"].includes(step?.name ?? "")
+          );
+          mintTxHash = extractTxHash(forwarderStep);
+        }
+
+        const finalStatus =
+          result.state === "success"
+            ? "COMPLETE"
+            : result.state === "error"
+              ? "FAILED"
+              : "PENDING";
+
+        const { error: updateError } = await supabase
+          .from("transactions")
+          .update({ tx_hash: burnTxHash, status: finalStatus })
+          .eq("id", txData.id);
+
+        if (updateError) {
+          console.error("Failed to update transaction:", updateError);
+        }
+
+        // Unblock the responder even if the burn event never fired on its own.
+        signalBurn();
+        return { ok: true as const, result };
+      })
+      .catch(async (bridgeError: AppKitError) => {
+        console.error("Bridge execution error:", bridgeError);
+
+        await supabase
+          .from("transactions")
+          .update({ status: "FAILED", tx_hash: burnTxHash })
+          .eq("id", txData.id);
+
+        signalBurn();
+        return { ok: false as const, error: bridgeError };
       });
 
-      if (!burnTxHash && result.steps && Array.isArray(result.steps)) {
-        const burnStep = result.steps.find((step: any) => step.name === "burn");
-        burnTxHash = extractTxHash(burnStep);
-      }
+    // Respond as soon as EITHER the burn is broadcast (common: reply 202
+    // PENDING and let the forwarder + webhook finish) OR the bridge fully
+    // settles in-band (SLOW transfers may complete before the burn signal is
+    // even awaited, and any pre-burn failure resolves here too).
+    const outcome = await Promise.race([
+      settlement.then((s) => ({ kind: "settled" as const, s })),
+      burnBroadcast.then(() => ({ kind: "burned" as const })),
+    ]);
 
-      // Forwarder-only destinations may surface completion hash on mint or
-      // attestation-oriented steps instead of a traditional destination mint tx.
-      if (!mintTxHash && result.steps && Array.isArray(result.steps)) {
-        const forwarderStep = result.steps.find((step: any) =>
-          ["mint", "fetchAttestation", "reAttest"].includes(step?.name)
+    if (outcome.kind === "settled") {
+      const s = outcome.s;
+
+      if (!s.ok) {
+        const bridgeError = s.error;
+        // Map common App Kit errors to friendlier messages.
+        let userMessage = bridgeError?.message || "Bridge transfer failed";
+        if (bridgeError?.code === 9002 || bridgeError?.type === "BALANCE") {
+          userMessage =
+            "Insufficient source-chain gas. Ensure the source wallet has native currency for gas fees.";
+        } else if (bridgeError?.code === 9001) {
+          userMessage = "Not enough USDC in the source wallet.";
+        }
+
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Bridge transfer failed",
+            message: userMessage,
+            code: bridgeError?.code,
+            type: bridgeError?.type,
+            txId: txData.id,
+          },
+          { status: 502 }
         );
-        mintTxHash = extractTxHash(forwarderStep);
       }
 
+      const result = s.result;
       const finalStatus =
         result.state === "success"
           ? "COMPLETE"
           : result.state === "error"
             ? "FAILED"
             : "PENDING";
-
-      const { error: updateError } = await supabase
-        .from("transactions")
-        .update({ tx_hash: burnTxHash, status: finalStatus })
-        .eq("id", txData.id);
-
-      if (updateError) {
-        console.error("Failed to update transaction:", updateError);
-      }
 
       return NextResponse.json({
         success: result.state === "success",
@@ -313,39 +420,27 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           details: serializeBigInt(result),
         },
       });
-    } catch (bridgeError: any) {
-      console.error("Bridge execution error:", bridgeError);
-
-      // Map common App Kit errors to friendlier messages.
-      let userMessage = bridgeError.message || "Bridge transfer failed";
-      if (bridgeError.code === 9002 || bridgeError.type === "BALANCE") {
-        userMessage =
-          "Insufficient source-chain gas. Ensure the source wallet has native currency for gas fees.";
-      } else if (bridgeError.code === 9001) {
-        userMessage = "Not enough USDC in the source wallet.";
-      }
-
-      await supabase
-        .from("transactions")
-        .update({ status: "FAILED", tx_hash: burnTxHash })
-        .eq("id", txData.id);
-
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Bridge transfer failed",
-          message: userMessage,
-          code: bridgeError.code,
-          type: bridgeError.type,
-          txId: txData.id,
-        },
-        { status: 502 }
-      );
     }
-  } catch (error: any) {
+
+    // Burn broadcast but the transfer hasn't settled in-band. Respond PENDING;
+    // the destination-mint webhook flips the row to COMPLETE.
+    return NextResponse.json(
+      {
+        success: true,
+        result: {
+          amount: amountNum.toString(),
+          txHash: burnTxHash,
+          mintTxHash: undefined,
+          status: "PENDING",
+          state: "pending",
+        },
+      },
+      { status: 202 }
+    );
+  } catch (error) {
     console.error("Rebalance error:", error);
     return NextResponse.json(
-      { error: error.message || "Internal Error" },
+      { error: error instanceof Error ? error.message : "Internal Error" },
       { status: 500 }
     );
   }
