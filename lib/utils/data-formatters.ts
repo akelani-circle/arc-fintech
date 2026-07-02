@@ -74,7 +74,7 @@ export interface TransactionDetails {
   tx_hash?: string
 }
 
-export function formatWalletDetails(wallet: any): WalletDetails {
+export function formatWalletDetails(wallet: Partial<WalletDetails>): WalletDetails {
   return {
     id: wallet.id || '',
     name: wallet.name || 'Unnamed Wallet',
@@ -86,7 +86,7 @@ export function formatWalletDetails(wallet: any): WalletDetails {
   }
 }
 
-export function formatTransactionDetails(tx: any): TransactionDetails {
+export function formatTransactionDetails(tx: Partial<TransactionDetails>): TransactionDetails {
   return {
     id: tx.id || '',
     amount: tx.amount || 0,

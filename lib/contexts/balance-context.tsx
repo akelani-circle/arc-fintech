@@ -222,6 +222,11 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let channel: RealtimeChannel | null = null
+    // `setupData` subscribes only after several awaits. If the effect is torn
+    // down (StrictMode double-mount, Fast Refresh, dep change) before then,
+    // this flag stops a stale, already-subscribed channel from being leaked —
+    // which otherwise trips ".on() after subscribe()" on the re-run.
+    let cancelled = false
 
     const setupData = async () => {
       try {
@@ -276,6 +281,8 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
           loadGatewayBalance(initialWallets),
           loadWalletBalance(initialWallets),
         ])
+
+        if (cancelled) return
 
         channel = subscribeBalanceRealtime({
           supabase,
@@ -419,6 +426,14 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
             }
           },
         })
+
+        // Raced past the guard above: the effect was torn down while
+        // `subscribeBalanceRealtime` was in flight. Remove the channel we just
+        // created so the next run starts clean.
+        if (cancelled) {
+          supabase.removeChannel(channel)
+          channel = null
+        }
       } catch (error) {
         console.error("Error setting up balance context:", error)
         setIsLoadingGateway(false)
@@ -430,6 +445,7 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
     setupData()
 
     return () => {
+      cancelled = true
       if (channel) supabase.removeChannel(channel)
       if (gatewayDebounceRef.current) clearTimeout(gatewayDebounceRef.current)
       if (walletDebounceRef.current) clearTimeout(walletDebounceRef.current)

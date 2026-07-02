@@ -88,8 +88,8 @@ export function SendButton() {
   const [showReviewWarning, setShowReviewWarning] = useState(false);
   const [isInternalWallet, setIsInternalWallet] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [settlementInfo, setSettlementInfo] = useState<SettlementInfo | null>(null);
-  const [routingInfo, setRoutingInfo] = useState<RoutingInfo | null>(null);
+  const [, setSettlementInfo] = useState<SettlementInfo | null>(null);
+  const [, setRoutingInfo] = useState<RoutingInfo | null>(null);
 
   const supabase = createClient();
   const { gatewayTotal, refreshGatewayBalance, refreshWalletBalance } = useBalanceContext();
@@ -111,9 +111,16 @@ export function SendButton() {
   });
 
   // Internal wallet check is unique to send (we want to redirect users to
-  // Transfer if the destination is one of their own wallets).
-  useEffect(() => {
+  // Transfer if the destination is one of their own wallets). Reset the flag
+  // during render the moment the address changes, before the debounced lookup
+  // below re-confirms it.
+  const [prevInternalAddr, setPrevInternalAddr] = useState(address);
+  if (prevInternalAddr !== address) {
+    setPrevInternalAddr(address);
     setIsInternalWallet(false);
+  }
+
+  useEffect(() => {
     if (!address || address.length < 10) return;
 
     let cancelled = false;
@@ -176,7 +183,7 @@ export function SendButton() {
     setIsSending(true);
 
     try {
-      const requestBody: any = {
+      const requestBody: Record<string, string> = {
         recipientAddress: address,
         amount,
         destinationChain,

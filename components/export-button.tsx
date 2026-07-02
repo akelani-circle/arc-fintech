@@ -180,8 +180,7 @@ export function ExportButton({ data, filename, type, className }: ExportButtonPr
 export function exportMultipleData(
   datasets: { data: ExportRow[]; filename: string; type: "transactions" | "wallets" }[]
 ) {
-  datasets.forEach(({ data, filename, type }) => {
-    const exportButton = { data, filename, type }
+  datasets.forEach(({ data, filename }) => {
     // Use the export logic from ExportButton
     if (data.length > 0) {
       const headers = Object.keys(data[0])

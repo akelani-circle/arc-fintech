@@ -103,7 +103,7 @@ export default function Page() {
   }
 
   const filteredWallets = React.useMemo(() => {
-    let result = wallets.filter((wallet) =>
+    const result = wallets.filter((wallet) =>
       wallet.name.toLowerCase().includes(filter.toLowerCase())
     )
 
@@ -136,10 +136,13 @@ export default function Page() {
     return filteredWallets.slice(start, start + ITEMS_PER_PAGE)
   }, [filteredWallets, currentPage])
 
-  // Reset to page 1 when filter changes
-  React.useEffect(() => {
+  // Reset to page 1 when the filter changes. Done during render (React's
+  // "adjust state when a value changes" pattern) instead of an effect.
+  const [prevFilter, setPrevFilter] = React.useState(filter)
+  if (prevFilter !== filter) {
+    setPrevFilter(filter)
     setCurrentPage(1)
-  }, [filter])
+  }
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -151,7 +154,7 @@ export default function Page() {
   }
 
   // Helper to render sort icon
-  const SortIcon = ({ columnKey }: { columnKey: "balance" | "created_at" }) => {
+  const sortIcon = (columnKey: "balance" | "created_at") => {
     if (sortConfig.key !== columnKey) return <IconArrowsSort className="ml-2 h-4 w-4" />
     if (sortConfig.direction === "asc") return <IconArrowUp className="ml-2 h-4 w-4" />
     return <IconArrowDown className="ml-2 h-4 w-4" />
@@ -188,7 +191,7 @@ export default function Page() {
                   className="hover:bg-transparent p-0 font-medium"
                 >
                   Balance
-                  <SortIcon columnKey="balance" />
+                  {sortIcon("balance")}
                 </Button>
               </TableHead>
               <TableHead className="text-right">
@@ -198,7 +201,7 @@ export default function Page() {
                   className="hover:bg-transparent p-0 font-medium"
                 >
                   Created At
-                  <SortIcon columnKey="created_at" />
+                  {sortIcon("created_at")}
                 </Button>
               </TableHead>
             </TableRow>

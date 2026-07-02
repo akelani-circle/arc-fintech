@@ -34,6 +34,7 @@ import {
   Transaction,
   Blockchain,
   TransactionType,
+  type AbiParametersInner,
 } from "@circle-fin/developer-controlled-wallets";
 
 export const GATEWAY_WALLET_ADDRESS = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
@@ -239,7 +240,7 @@ async function initiateContractInteraction(
   walletId: string,
   contractAddress: Address,
   abiFunctionSignature: string,
-  args: any[]
+  args: AbiParametersInner[]
 ): Promise<string> {
   const response = await circleDeveloperSdk.createContractExecutionTransaction({
     walletId,
@@ -380,13 +381,13 @@ export async function initiateDepositFromCustodialWallet(
 }
 
 export async function submitBurnIntent(
-  burnIntent: any,
+  burnIntent: BurnIntentData,
   signature: `0x${string}`
 ): Promise<{
   attestation: `0x${string}`;
   attestationSignature: `0x${string}`;
   transferId: string;
-  fees: any;
+  fees: unknown;
 }> {
   const payload = [
     {
@@ -465,14 +466,14 @@ async function signBurnIntentWithEOA(
   console.log("Signing burn intent with EOA:", address);
 
   // Helper function to serialize BigInt values for JSON
-  const serializeBigInt = (obj: any): any => {
+  const serializeBigInt = (obj: unknown): unknown => {
     if (obj === null || obj === undefined) return obj;
     if (typeof obj === "bigint") return obj.toString();
     if (Array.isArray(obj)) return obj.map(serializeBigInt);
     if (typeof obj === "object") {
-      const result: any = {};
+      const result: Record<string, unknown> = {};
       for (const key in obj) {
-        result[key] = serializeBigInt(obj[key]);
+        result[key] = serializeBigInt((obj as Record<string, unknown>)[key]);
       }
       return result;
     }
@@ -524,9 +525,10 @@ export async function executeGatewayMint(
         config: { feeLevel: "MEDIUM" },
       },
     });
-  } catch (error: any) {
-    console.error("Circle API error during mint:", error?.response?.data || error.message);
-    throw new Error(`Failed to execute mint transaction: ${error?.response?.data?.message || error.message}`);
+  } catch (error) {
+    const err = error as { response?: { data?: { message?: string } }; message?: string };
+    console.error("Circle API error during mint:", err?.response?.data || err.message);
+    throw new Error(`Failed to execute mint transaction: ${err?.response?.data?.message || err.message}`);
   }
 
   const challengeId = response.data?.id;
@@ -821,21 +823,22 @@ async function withRetry<T>(
   maxRetries = 3,
   initialDelay = 1000
 ): Promise<T> {
-  let lastError: Error | undefined;
-  
+  let lastError: unknown;
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       await rateLimitedDelay();
       return await fn();
-    } catch (error: any) {
+    } catch (error) {
       lastError = error;
-      
+
+      const err = error as { message?: string; status?: number; details?: string };
       // Check if it's a rate limit error
-      const isRateLimitError = 
-        error?.message?.includes("429") || 
-        error?.status === 429 ||
-        error?.details?.includes("rate limit");
-      
+      const isRateLimitError =
+        err?.message?.includes("429") ||
+        err?.status === 429 ||
+        err?.details?.includes("rate limit");
+
       if (isRateLimitError && attempt < maxRetries - 1) {
         const delay = initialDelay * Math.pow(2, attempt);
         console.log(`Rate limit hit, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);

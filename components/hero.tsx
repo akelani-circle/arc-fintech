@@ -20,7 +20,6 @@ import React from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
-  Shield,
   Zap,
   CheckCircle,
   Wallet,
@@ -110,7 +109,7 @@ export function Hero() {
               </div>
               <h3 className="text-lg font-semibold mb-2">Integrate SDK</h3>
               <p className="text-sm text-muted-foreground">
-                Add Circle's SDK to your application in minutes.
+                Add Circle&apos;s SDK to your application in minutes.
               </p>
             </div>
 
@@ -154,7 +153,7 @@ export function Hero() {
             Ready to Build the Future of Finance?
           </h2>
           <p className="text-lg text-muted-foreground">
-            Start building with Circle's developer tools today.
+            Start building with Circle&apos;s developer tools today.
           </p>
         </div>
         <div className="flex justify-center gap-4">

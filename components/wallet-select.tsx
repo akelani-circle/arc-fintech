@@ -30,6 +30,10 @@ import {
 import { toast } from "sonner"
 import { useBalanceContext } from "@/lib/contexts/balance-context"
 
+// Stable reference for the "no balance context" fallback so it doesn't
+// re-trigger the displayedWallets useMemo on every render.
+const EMPTY_WALLET_BALANCES: Record<string, string> = {}
+
 export type WalletOption = {
   id: string
   address: string
@@ -84,12 +88,12 @@ export function WalletSelect({
   const supabase = createClient()
   
   // Try to access balance context, handle if it's not available
-  let walletBalances: Record<string, string> = {}
+  let walletBalances: Record<string, string> = EMPTY_WALLET_BALANCES
   try {
-    // eslint-disable-next-line
+     
     const context = useBalanceContext()
     walletBalances = context.walletBalances
-  } catch (e) {
+  } catch {
     // Ignore error if context is missing
   }
 

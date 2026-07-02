@@ -18,7 +18,7 @@
 
 import { NextResponse } from "next/server";
 import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
-import { getUsdcBalance, type SupportedChain, USDC_ADDRESSES } from "@/lib/circle/gateway-sdk";
+import { getUsdcBalance, type SupportedChain } from "@/lib/circle/gateway-sdk";
 import type { Address } from "viem";
 import { withAuth } from "@/lib/api/with-auth";
 

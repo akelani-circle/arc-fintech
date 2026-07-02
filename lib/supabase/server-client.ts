@@ -17,7 +17,7 @@
  */
 
 import { type NextRequest, type NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 
 export function createSupabaseReqResClient(
   req: NextRequest,
@@ -31,8 +31,8 @@ export function createSupabaseReqResClient(
         getAll() {
           return req.cookies.getAll();
         },
-        setAll(cookiesToSet: any[]) {
-          cookiesToSet.forEach(({ name, value, options }: any) =>
+        setAll(cookiesToSet: { name: string; value: string; options?: CookieOptions }[]) {
+          cookiesToSet.forEach(({ name, value, options }) =>
             res.cookies.set(name, value, options)
           );
         },

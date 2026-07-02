@@ -117,7 +117,7 @@ export default function EarnVaultsPage() {
     [data?.vaults]
   )
 
-  const SortIcon = ({ columnKey }: { columnKey: SortKey }) => {
+  const sortIcon = (columnKey: SortKey) => {
     if (sortConfig.key !== columnKey)
       return <IconArrowsSort className="ml-1 h-3.5 w-3.5 opacity-50" />
     if (sortConfig.direction === "asc")
@@ -179,7 +179,7 @@ export default function EarnVaultsPage() {
                   className="h-auto p-0 font-medium hover:bg-transparent"
                 >
                   Vault
-                  <SortIcon columnKey="name" />
+                  {sortIcon("name")}
                 </Button>
               </TableHead>
               <TableHead className="text-right">
@@ -189,7 +189,7 @@ export default function EarnVaultsPage() {
                   className="ml-auto h-auto p-0 font-medium hover:bg-transparent"
                 >
                   Deposits
-                  <SortIcon columnKey="deposits" />
+                  {sortIcon("deposits")}
                 </Button>
               </TableHead>
               <TableHead className="text-right">
@@ -199,7 +199,7 @@ export default function EarnVaultsPage() {
                   className="ml-auto h-auto p-0 font-medium hover:bg-transparent"
                 >
                   Liquidity
-                  <SortIcon columnKey="liquidity" />
+                  {sortIcon("liquidity")}
                 </Button>
               </TableHead>
               <TableHead>Collateral</TableHead>
@@ -210,7 +210,7 @@ export default function EarnVaultsPage() {
                   className="ml-auto h-auto p-0 font-medium hover:bg-transparent"
                 >
                   APY
-                  <SortIcon columnKey="apy" />
+                  {sortIcon("apy")}
                 </Button>
               </TableHead>
             </TableRow>

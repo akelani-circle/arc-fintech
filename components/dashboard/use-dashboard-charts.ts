@@ -10,7 +10,7 @@
 
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useSyncExternalStore } from "react"
 import { isGatewayDepositRecipient } from "@/lib/constants/chains"
 import type {
   FullTransaction,
@@ -35,6 +35,23 @@ function buildWindow(): string[] {
   return dates
 }
 
+// Compute the rolling window exactly once, on mount, inside the store's
+// `subscribe` (commit phase) rather than during render — keeping `new Date()`
+// out of both SSR and the render path. `getSnapshot` only ever returns the
+// cached value.
+function useClientWindow(): string[] | null {
+  const valueRef = useRef<string[] | null>(null)
+  const subscribe = useCallback((onStoreChange: () => void) => {
+    if (valueRef.current === null) {
+      valueRef.current = buildWindow()
+      onStoreChange()
+    }
+    return () => {}
+  }, [])
+  const getSnapshot = useCallback(() => valueRef.current, [])
+  return useSyncExternalStore(subscribe, getSnapshot, () => null)
+}
+
 export type DashboardChartDatasets = {
   transactionsChartData: Array<{ date: string; total: number }>
   flowData: Array<{ date: string; inflow: number; outflow: number }>
@@ -57,15 +74,13 @@ export function useDashboardCharts(
   transactions: FullTransaction[],
   wallets: FullWallet[]
 ): DashboardChartDatasets {
-  // Defer "what days are in the rolling 90d window" to a browser-only effect
-  // so SSR doesn't try to read the current time. Until the effect fires we
-  // return empty datasets, which is fine — the charts also need
-  // transactions/wallets from BalanceContext (also browser-only) before they
-  // render anything meaningful.
-  const [windowDates, setWindowDates] = useState<string[] | null>(null)
-  useEffect(() => {
-    setWindowDates(buildWindow())
-  }, [])
+  // Defer "what days are in the rolling 90d window" to a browser-only external
+  // store so neither SSR nor render reads the current time (`new Date()` in
+  // render is forbidden — see `buildWindow`). The value is computed once on
+  // mount inside `subscribe`; until then it is `null` and we return empty
+  // datasets, which is fine — the charts also need transactions/wallets from
+  // BalanceContext (also browser-only) before they render anything meaningful.
+  const windowDates = useClientWindow()
 
   return useMemo(() => {
     if (!windowDates) {

@@ -16,15 +16,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import coreWebVitals from "eslint-config-next/core-web-vitals";
-import typescript from "eslint-config-next/typescript";
+import * as React from "react"
 
-// eslint-config-next 16 ships native flat-config arrays, so we spread them
-// directly. The previous FlatCompat shim crashed the config validator
-// ("Converting circular structure to JSON") under eslint 9.
-const eslintConfig = [
-  ...coreWebVitals,
-  ...typescript,
-];
+const subscribe = () => () => {}
 
-export default eslintConfig;
+/**
+ * Returns `false` during SSR and the initial (hydrating) client render, then
+ * `true` once mounted. Backed by `useSyncExternalStore` so the server snapshot
+ * and first client render agree — no hydration mismatch, and no
+ * `setState`-in-effect. Use it to gate browser-only computations (current
+ * time, `window`, etc.) that would otherwise run during render.
+ */
+export function useHydrated() {
+  return React.useSyncExternalStore(
+    subscribe,
+    () => true,
+    () => false,
+  )
+}

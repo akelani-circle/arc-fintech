@@ -32,7 +32,6 @@ import {
 } from "@/components/ui/table"
 import {
   IconCopy,
-  IconArrowLeft,
   IconArrowUp,
   IconArrowDown,
   IconCalendar,
@@ -48,7 +47,7 @@ export function TransactionDetailsCard({ transaction }: { transaction: Transacti
     try {
       await navigator.clipboard.writeText(text)
       toast.success(`${label} copied to clipboard`)
-    } catch (error) {
+    } catch {
       toast.error("Failed to copy to clipboard")
     }
   }

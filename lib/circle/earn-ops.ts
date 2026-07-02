@@ -32,7 +32,7 @@ import {
   type EarnAssetAmount,
   type EarnGasFeeEstimate,
 } from "@circle-fin/earn-kit"
-import { getEarnError, isNoPositionError } from "@/lib/earn/errors"
+import { isNoPositionError } from "@/lib/earn/errors"
 import {
   getEarnKit,
   earnFromContext,

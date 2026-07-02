@@ -65,10 +65,18 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
   // withdrawable position balance for withdrawals.
   const maxAmount = mode === "deposit" ? walletUsdc : positionBalance
 
-  // Debounced quote fetch whenever wallet + amount change.
-  React.useEffect(() => {
+  // Clear any prior quote the instant the inputs change — during render — so
+  // stale numbers never linger through the debounce window below.
+  const quoteInputKey = `${mode}:${walletId ?? ""}:${amount}:${vault.vaultAddress}`
+  const [prevQuoteInputKey, setPrevQuoteInputKey] = React.useState(quoteInputKey)
+  if (prevQuoteInputKey !== quoteInputKey) {
+    setPrevQuoteInputKey(quoteInputKey)
     setQuote(null)
     setQuoteError(null)
+  }
+
+  // Debounced quote fetch whenever wallet + amount change.
+  React.useEffect(() => {
     if (!walletId || !amount || Number(amount) <= 0) return
 
     let cancelled = false
