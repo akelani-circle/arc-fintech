@@ -17,7 +17,10 @@ import { IconGift } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { EarnPosition } from "@/lib/earn/types"
-import type { MockRewardToken } from "@/lib/earn/mock-rewards"
+import {
+  REWARD_DISPLAY_DECIMALS,
+  type MockRewardToken,
+} from "@/lib/earn/mock-rewards"
 import { formatTokenAmount, formatYieldAmount, trimAmount } from "@/lib/earn/format"
 
 /**
@@ -91,7 +94,7 @@ export function EarnPositionSummary({
             label={`Rewards (${r.token})`}
             value={
               <span className="text-emerald-600">
-                {formatTokenAmount(r.accrued, r.token, 4)}
+                {formatTokenAmount(r.accrued, r.token, REWARD_DISPLAY_DECIMALS)}
               </span>
             }
           />

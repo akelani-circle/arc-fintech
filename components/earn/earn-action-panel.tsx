@@ -29,7 +29,11 @@ import {
   useEarnActivity,
   earnKeys,
 } from "@/lib/earn/use-earn"
-import { useMockRewards } from "@/lib/earn/mock-rewards"
+import {
+  useMockRewards,
+  REWARD_DISPLAY_DECIMALS,
+  CLAIM_MIN_ACCRUED,
+} from "@/lib/earn/mock-rewards"
 import type { EarnVault, EarnQuote } from "@/lib/earn/types"
 import { formatApy, formatTokenAmount, trimAmount } from "@/lib/earn/format"
 import { EarnPositionSummary } from "@/components/earn/earn-position-summary"
@@ -71,8 +75,8 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
 
   const handleClaim = () => {
     const claimed = rewards.tokens
-      .filter((t) => t.accrued > 1e-6)
-      .map((t) => formatTokenAmount(t.accrued, t.token, 4))
+      .filter((t) => t.accrued >= CLAIM_MIN_ACCRUED)
+      .map((t) => formatTokenAmount(t.accrued, t.token, REWARD_DISPLAY_DECIMALS))
       .join(", ")
     rewards.claim()
     toast.success("Rewards claimed", {

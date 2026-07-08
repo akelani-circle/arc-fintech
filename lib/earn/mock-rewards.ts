@@ -32,6 +32,21 @@ const SECONDS_PER_YEAR = 365 * 24 * 60 * 60
 const TICK_MS = 5_000
 
 /**
+ * Decimals used to render accrued reward amounts. Reward accrual is slow, so
+ * this is deliberately fine (micro-unit, matching USDC's smallest unit) to keep
+ * the ticking figure visible rather than rounding it to a flat 0.
+ */
+export const REWARD_DISPLAY_DECIMALS = 6
+
+/**
+ * Smallest accrued amount worth claiming: one displayable unit at the precision
+ * above. Deriving the claim threshold from the display precision keeps the two
+ * in lockstep — the Claim button never enables for an amount that still renders
+ * as 0.
+ */
+export const CLAIM_MIN_ACCRUED = 10 ** -REWARD_DISPLAY_DECIMALS
+
+/**
  * Reward APY used only when a vault advertises no reward incentive at all
  * (no `rewards[]` and `currentApy <= nativeApy`). Keeps the demo showing
  * something plausible rather than an empty reward panel on every testnet vault.
@@ -207,9 +222,9 @@ export function useMockRewards({
   return {
     tokens,
     totalAccrued,
-    // Guard against sub-display-precision dust so the button isn't "claimable"
-    // for an amount that renders as 0.0000.
-    canClaim: hasPosition && totalAccrued > 1e-6,
+    // Enable only once at least one displayable unit has accrued, so the button
+    // never goes live for an amount that still renders as 0.
+    canClaim: hasPosition && totalAccrued >= CLAIM_MIN_ACCRUED,
     claim,
   }
 }
