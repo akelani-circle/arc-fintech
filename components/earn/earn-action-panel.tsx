@@ -13,7 +13,7 @@
 "use client"
 
 import * as React from "react"
-import { IconLoader2, IconExternalLink } from "@tabler/icons-react"
+import { IconLoader2 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { useQueryClient } from "@tanstack/react-query"
 
@@ -26,8 +26,10 @@ import { useBalanceContext } from "@/lib/contexts/balance-context"
 import {
   fetchEarnQuote,
   useEarnPosition,
+  useEarnActivity,
   earnKeys,
 } from "@/lib/earn/use-earn"
+import { useMockRewards } from "@/lib/earn/mock-rewards"
 import type { EarnVault, EarnQuote } from "@/lib/earn/types"
 import { formatApy, formatTokenAmount, trimAmount } from "@/lib/earn/format"
 import { EarnPositionSummary } from "@/components/earn/earn-position-summary"
@@ -55,6 +57,28 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
 
   const walletId = wallet?.circle_wallet_id ?? null
   const position = useEarnPosition(walletId, vault.vaultAddress)
+
+  // Mocked Merkl-style reward incentives (see lib/earn/mock-rewards.ts). Reward
+  // epochs don't fire on Arc Testnet, so accrual + claiming are simulated on the
+  // client from the real balance, reward APY, and deposit history.
+  const { data: activity } = useEarnActivity(vault.vaultAddress)
+  const rewards = useMockRewards({
+    vault,
+    position: position.data,
+    walletId,
+    activity,
+  })
+
+  const handleClaim = () => {
+    const claimed = rewards.tokens
+      .filter((t) => t.accrued > 1e-6)
+      .map((t) => formatTokenAmount(t.accrued, t.token, 4))
+      .join(", ")
+    rewards.claim()
+    toast.success("Rewards claimed", {
+      description: claimed ? `${claimed} - ${vault.name}` : vault.name,
+    })
+  }
 
   const walletUsdc = parseWalletBalance(
     wallet ? walletBalances[wallet.circle_wallet_id] : undefined
@@ -264,11 +288,18 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
             )}
           </div>
 
-          {/* Position summary for the selected wallet */}
+          {/* Position summary for the selected wallet, with mocked accrued
+              reward rows + a Claim action grouped inside the same card when
+              there's an active position. */}
           {wallet && (
             <EarnPositionSummary
               query={position}
               asset={vault.asset}
+              rewards={
+                position.data?.hasPosition ? rewards.tokens : undefined
+              }
+              onClaimRewards={handleClaim}
+              canClaimRewards={rewards.canClaim && !isSubmitting}
             />
           )}
 
@@ -288,23 +319,24 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
             </div>
           )}
 
-          <Button onClick={handleSubmit} disabled={submitDisabled}>
-            {isSubmitting ? (
-              <>
-                <IconLoader2 className="size-4 animate-spin" />
-                Processing...
-              </>
-            ) : mode === "deposit" ? (
-              "Deposit"
-            ) : (
-              "Withdraw"
-            )}
-          </Button>
+          <div className="flex flex-col gap-2">
+            <Button onClick={handleSubmit} disabled={submitDisabled}>
+              {isSubmitting ? (
+                <>
+                  <IconLoader2 className="size-4 animate-spin" />
+                  Processing...
+                </>
+              ) : mode === "deposit" ? (
+                "Deposit"
+              ) : (
+                "Withdraw"
+              )}
+            </Button>
 
-          <p className="text-muted-foreground flex items-center gap-1 text-[11px]">
-            <IconExternalLink className="size-3" />
-            Executed on-chain via EarnKit on Arc Testnet.
-          </p>
+            <p className="text-muted-foreground text-[11px]">
+              Executed on-chain via EarnKit on Arc Testnet.
+            </p>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

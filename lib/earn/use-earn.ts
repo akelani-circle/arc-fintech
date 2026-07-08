@@ -13,6 +13,7 @@
 "use client"
 
 import { useQuery } from "@tanstack/react-query"
+import { createClient } from "@/lib/supabase/client"
 import type {
   EarnVault,
   EarnVaultsResponse,
@@ -20,6 +21,15 @@ import type {
   EarnPositionsResponse,
   EarnQuote,
 } from "@/lib/earn/types"
+
+/** A user's own deposit/withdraw row for a vault, from the transactions table. */
+export interface EarnTx {
+  id: string
+  amount: number
+  type: "EARN_DEPOSIT" | "EARN_WITHDRAW"
+  tx_hash: string | null
+  created_at: string
+}
 
 export interface EarnVaultFilters {
   protocol?: string
@@ -116,6 +126,34 @@ export function useEarnPosition(
     enabled: !!walletId && /^0x[a-fA-F0-9]{40}$/.test(vaultAddress),
     // A position can move on every block; keep it fresh but not chatty.
     staleTime: 15_000,
+  })
+}
+
+/**
+ * The authenticated user's own deposit/withdraw history for a single vault,
+ * read from Supabase (RLS scopes rows to the user). Deposits log the vault as
+ * recipient and withdrawals log it as sender, so we match either side. Shared
+ * by the Activity tab and the mock-rewards accrual clock, keyed so both read
+ * one cached result.
+ */
+export function useEarnActivity(vaultAddress: string) {
+  return useQuery({
+    queryKey: earnKeys.activity(vaultAddress),
+    queryFn: async (): Promise<EarnTx[]> => {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("id, amount, type, tx_hash, created_at")
+        .in("type", ["EARN_DEPOSIT", "EARN_WITHDRAW"])
+        .or(
+          `sender_address.ilike.${vaultAddress},recipient_address.ilike.${vaultAddress}`
+        )
+        .order("created_at", { ascending: false })
+        .limit(25)
+
+      if (error) throw error
+      return (data ?? []) as EarnTx[]
+    },
   })
 }
 
