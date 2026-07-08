@@ -112,6 +112,18 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
     setQuoteError(null)
   }
 
+  // Cap typed/pasted input to the wallet's available headroom for the active
+  // mode. The native `max=` attribute only drives validation + spinners, not the
+  // typed value, so the actual clamp has to happen here. Empty and mid-typing
+  // states ("", "1.") pass through untouched so the field stays editable.
+  const clampAmount = (raw: string) => {
+    if (raw === "") return ""
+    const n = Number(raw)
+    if (!Number.isFinite(n)) return amount // reject garbage, keep prior value
+    if (maxAmount > 0 && n > maxAmount) return trimAmount(maxAmount)
+    return raw
+  }
+
   const handleMax = () => {
     if (maxAmount > 0) setAmount(trimAmount(maxAmount))
   }
@@ -225,11 +237,12 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
                 id="earn-amount"
                 type="number"
                 min={0}
+                max={maxAmount > 0 ? maxAmount : undefined}
                 step="any"
                 inputMode="decimal"
                 placeholder="0.00"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => setAmount(clampAmount(e.target.value))}
                 disabled={!wallet || isSubmitting}
                 className="pr-14"
               />

@@ -15,7 +15,7 @@
 import type { UseQueryResult } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { EarnPosition } from "@/lib/earn/types"
-import { formatTokenAmount, trimAmount } from "@/lib/earn/format"
+import { formatTokenAmount, formatYieldAmount, trimAmount } from "@/lib/earn/format"
 
 /**
  * Compact "your position" block driven by the shared `useEarnPosition` query.
@@ -53,28 +53,15 @@ export function EarnPositionSummary({
       <div className="flex flex-col gap-1 text-sm">
         <Row
           label="Balance"
-          value={formatTokenAmount(data.currentBalance, asset, 6)}
+          value={formatTokenAmount(data.currentBalance, asset, 2)}
         />
         {data.pnl.status === "available" ? (
           <>
             <Row
               label="Principal"
-              value={formatTokenAmount(data.pnl.principalDeposited, asset, 6)}
+              value={formatTokenAmount(data.pnl.principalDeposited, asset, 2)}
             />
-            <Row
-              label="Yield earned"
-              value={
-                <span
-                  className={
-                    Number(data.pnl.totalYieldEarned) >= 0
-                      ? "text-emerald-600"
-                      : "text-red-500"
-                  }
-                >
-                  {formatTokenAmount(data.pnl.totalYieldEarned, asset, 6)}
-                </span>
-              }
-            />
+            <Row label="Yield earned" value={<YieldValue amount={data.pnl.totalYieldEarned} asset={asset} />} />
           </>
         ) : data.pnl.status === "pending" ? (
           <Row label="P&L" value={<span className="text-muted-foreground">Calculating...</span>} />
@@ -85,6 +72,23 @@ export function EarnPositionSummary({
       </div>
     </div>
   )
+}
+
+/**
+ * Yield earned, formatted like a fiat balance (2 dp) with the sign color taken
+ * from the rounded value. Sub-unit ERC-4626 rounding dust on a fresh deposit
+ * reads as a neutral "0.00 USDC" rather than an alarming red micro-loss, while a
+ * real gain or loss above display precision is colored green/red.
+ */
+function YieldValue({ amount, asset }: { amount: string; asset: string }) {
+  const { text, sign } = formatYieldAmount(amount, asset, 2)
+  const className =
+    sign === "positive"
+      ? "text-emerald-600"
+      : sign === "negative"
+        ? "text-red-500"
+        : "text-muted-foreground"
+  return <span className={className}>{text}</span>
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
