@@ -39,12 +39,13 @@ const TICK_MS = 5_000
 export const REWARD_DISPLAY_DECIMALS = 6
 
 /**
- * Smallest accrued amount worth claiming: one displayable unit at the precision
- * above. Deriving the claim threshold from the display precision keeps the two
- * in lockstep — the Claim button never enables for an amount that still renders
- * as 0.
+ * Smallest accrued amount worth claiming: half a display unit — the point at
+ * which the rounded display first shows a nonzero value. Deriving the claim
+ * threshold from the display precision this way keeps the two in exact lockstep,
+ * so the Claim button enables on the same tick the row first reads nonzero
+ * (never showing a nonzero amount while still disabled, or vice versa).
  */
-export const CLAIM_MIN_ACCRUED = 10 ** -REWARD_DISPLAY_DECIMALS
+export const CLAIM_MIN_ACCRUED = 0.5 * 10 ** -REWARD_DISPLAY_DECIMALS
 
 /**
  * Reward APY used only when a vault advertises no reward incentive at all
