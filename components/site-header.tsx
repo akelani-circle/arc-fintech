@@ -19,7 +19,7 @@
 "use client"
 
 import Link from "next/link"
-import { IconArrowLeft, IconExternalLink, IconCopy } from "@tabler/icons-react"
+import { IconArrowLeft, IconCopy } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -102,10 +102,9 @@ export function SiteHeader() {
               href={getExplorerUrl("ARC-TESTNET", headerContent.address)}
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-primary flex items-center gap-1 font-mono"
+              className="hover:text-primary font-mono"
             >
               {shortenAddress(headerContent.address)}
-              <IconExternalLink className="size-3" />
             </a>
             <Button
               variant="ghost"
@@ -128,6 +127,16 @@ export function SiteHeader() {
 
         {/* ml-auto ensures this stays on the right whether search exists or not */}
         <div className={`flex items-center gap-2 ${pathname !== "/dashboard" ? "ml-auto" : ""}`}>
+          {/* Page-provided stat pills (e.g. deposit totals on the vaults list). */}
+          {headerContent?.stats?.map((stat) => (
+            <div
+              key={stat.label}
+              className="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs whitespace-nowrap"
+            >
+              <span className="text-muted-foreground">{stat.label}</span>
+              <span className="font-semibold">{stat.value}</span>
+            </div>
+          ))}
           <ThemeSwitcher />
         </div>
       </div>

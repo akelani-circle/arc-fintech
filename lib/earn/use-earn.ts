@@ -17,6 +17,7 @@ import type {
   EarnVault,
   EarnVaultsResponse,
   EarnPosition,
+  EarnPositionsResponse,
   EarnQuote,
 } from "@/lib/earn/types"
 
@@ -43,6 +44,8 @@ export const earnKeys = {
   vault: (vaultAddress: string) => ["earn", "vault", vaultAddress] as const,
   position: (walletId: string | null, vaultAddress: string) =>
     ["earn", "position", walletId, vaultAddress] as const,
+  positions: (vaultAddresses: string[]) =>
+    ["earn", "positions", vaultAddresses] as const,
   activity: (vaultAddress: string) =>
     ["earn", "activity", vaultAddress] as const,
 }
@@ -59,6 +62,34 @@ export function useEarnVaults(filters: EarnVaultFilters) {
       const qs = params.toString()
       return getJson<EarnVaultsResponse>(`/api/earn/vaults${qs ? `?${qs}` : ""}`)
     },
+  })
+}
+
+/**
+ * Summed "Your position" balances for a set of vaults, aggregated server-side
+ * across all the user's Arc wallets. Keyed by lowercased vault address; a
+ * missing key means no position. Sorted address list keeps the query key
+ * stable regardless of the vaults' incoming order.
+ */
+export function useEarnPositions(vaultAddresses: string[]) {
+  const sorted = [...vaultAddresses].sort()
+  return useQuery({
+    queryKey: earnKeys.positions(sorted),
+    queryFn: async () => {
+      const res = await fetch("/api/earn/positions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vaults: sorted }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.userMessage || data.error || "Request failed")
+      }
+      return data as EarnPositionsResponse
+    },
+    enabled: sorted.length > 0,
+    // Positions move per block; keep fresh but not chatty, matching useEarnPosition.
+    staleTime: 15_000,
   })
 }
 

@@ -42,13 +42,20 @@ import {
 import type {
   EarnVault,
   EarnPosition,
+  EarnVaultHolding,
   EarnDepositQuote,
   EarnWithdrawalQuote,
   EarnAmount,
   EarnGasFee,
   EarnWriteResult,
 } from "@/lib/earn/types"
-import { createPublicClient, http, formatUnits, type Address } from "viem"
+import {
+  createPublicClient,
+  http,
+  formatUnits,
+  getAddress,
+  type Address,
+} from "viem"
 import { arcTestnet } from "@/lib/circle/gateway-sdk"
 
 export interface ExploreFilters {
@@ -125,6 +132,107 @@ async function withOnChainTotalDeposits(vault: EarnVault): Promise<EarnVault> {
 
 function mapAmount(a: EarnAssetAmount): EarnAmount {
   return { symbol: a.symbol, amount: a.amount, type: a.type }
+}
+
+const ERC4626_POSITION_ABI = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "convertToAssets",
+    stateMutability: "view",
+    inputs: [{ name: "shares", type: "uint256" }],
+    outputs: [{ type: "uint256" }],
+  },
+] as const
+
+/**
+ * viem client for Arc Testnet reads with transport-level batching: every
+ * `eth_call` fired within one tick is coalesced into a single JSON-RPC HTTP
+ * request. Lets the positions summary read many balances in one round trip.
+ */
+function arcBatchReadClient() {
+  return createPublicClient({
+    chain: arcTestnet,
+    transport: http(undefined, { batch: true }),
+  })
+}
+
+/** One (vault, wallet) position to read on-chain. */
+export interface EarnHoldingPair {
+  vaultAddress: string
+  walletAddress: string
+}
+
+/**
+ * Sum a user's current position value per vault by reading ERC-4626 share
+ * balances directly on-chain, bypassing EarnKit's metered API entirely (the
+ * same reason `withOnChainTotalDeposits` reads the chain: it is the source of
+ * truth and off the rate-limited path). All `balanceOf` reads are fired
+ * together so transport batching sends them as one request; per vault we sum
+ * shares across the user's wallets and convert once, since ERC-4626
+ * `convertToAssets` is linear. Best-effort: a failed read counts as 0 for that
+ * pair rather than failing the whole column.
+ */
+export async function sumEarnHoldingsOnChain(
+  pairs: EarnHoldingPair[]
+): Promise<Record<string, EarnVaultHolding>> {
+  if (pairs.length === 0) return {}
+  const client = arcBatchReadClient()
+
+  // Accumulate share balances keyed by lowercased vault address.
+  const sharesByVault = new Map<string, bigint>()
+  await Promise.all(
+    pairs.map(async ({ vaultAddress, walletAddress }) => {
+      try {
+        const shares = await client.readContract({
+          address: getAddress(vaultAddress),
+          abi: ERC4626_POSITION_ABI,
+          functionName: "balanceOf",
+          args: [getAddress(walletAddress)],
+        })
+        const key = vaultAddress.toLowerCase()
+        sharesByVault.set(key, (sharesByVault.get(key) ?? BigInt(0)) + shares)
+      } catch (error) {
+        console.error(
+          `Earn on-chain balanceOf failed for ${walletAddress} / ${vaultAddress}:`,
+          error
+        )
+      }
+    })
+  )
+
+  const holdings: Record<string, EarnVaultHolding> = {}
+  await Promise.all(
+    [...sharesByVault.entries()].map(async ([vaultKey, totalShares]) => {
+      if (totalShares === BigInt(0)) return
+      try {
+        const assets = await client.readContract({
+          address: getAddress(vaultKey),
+          abi: ERC4626_POSITION_ABI,
+          functionName: "convertToAssets",
+          args: [totalShares],
+        })
+        if (assets > BigInt(0)) {
+          holdings[vaultKey] = {
+            balance: formatUnits(assets, USDC_DECIMALS),
+            hasPosition: true,
+          }
+        }
+      } catch (error) {
+        console.error(
+          `Earn on-chain convertToAssets failed for ${vaultKey}:`,
+          error
+        )
+      }
+    })
+  )
+  return holdings
 }
 
 function mapGasFees(

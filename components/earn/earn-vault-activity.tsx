@@ -13,13 +13,19 @@
 "use client"
 
 import { useQuery } from "@tanstack/react-query"
-import { IconArrowDownLeft, IconArrowUpRight } from "@tabler/icons-react"
+import { toast } from "sonner"
+import {
+  IconArrowDownLeft,
+  IconArrowUpRight,
+  IconCopy,
+} from "@tabler/icons-react"
 
 import { createClient } from "@/lib/supabase/client"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { earnKeys } from "@/lib/earn/use-earn"
-import { getExplorerUrl } from "@/lib/utils/data-formatters"
+import { getExplorerUrl, shortenAddress } from "@/lib/utils/data-formatters"
 import { formatTokenAmount } from "@/lib/earn/format"
 import { formatDate } from "@/lib/utils/data-formatters"
 
@@ -66,6 +72,15 @@ export function EarnVaultActivity({
     },
   })
 
+  const copyHash = async (hash: string) => {
+    try {
+      await navigator.clipboard.writeText(hash)
+      toast.success("Transaction hash copied")
+    } catch {
+      toast.error("Failed to copy to clipboard")
+    }
+  }
+
   if (rows === undefined) {
     return (
       <div className="flex flex-col gap-2">
@@ -102,25 +117,38 @@ export function EarnVaultActivity({
                 <span className="text-sm font-medium">
                   {isDeposit ? "Deposit" : "Withdraw"}
                 </span>
-                <span className="text-muted-foreground text-xs">
-                  {formatDate(tx.created_at)}
-                </span>
+                <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                  <span>{formatDate(tx.created_at)}</span>
+                  {tx.tx_hash && (
+                    <>
+                      <span aria-hidden="true">•</span>
+                      <a
+                        href={getExplorerUrl("ARC-TESTNET", tx.tx_hash, "tx")}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:text-primary font-mono"
+                      >
+                        {shortenAddress(tx.tx_hash)}
+                      </a>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-5"
+                        onClick={() => copyHash(tx.tx_hash!)}
+                        aria-label="Copy transaction hash"
+                      >
+                        <IconCopy className="size-3" />
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium">
                 {formatTokenAmount(tx.amount, asset, 2)}
               </span>
-              {tx.tx_hash ? (
-                <a
-                  href={getExplorerUrl("ARC-TESTNET", tx.tx_hash, "tx")}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-muted-foreground hover:text-primary text-xs underline"
-                >
-                  tx
-                </a>
-              ) : (
+              {!tx.tx_hash && (
                 <Badge variant="outline" className="font-normal">
                   pending
                 </Badge>

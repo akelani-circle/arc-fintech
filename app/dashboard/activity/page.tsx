@@ -30,6 +30,7 @@ import {
   IconArrowDown,
   IconArrowsSort,
   IconRefresh,
+  IconMinus,
 } from "@tabler/icons-react"
 import { format } from "date-fns"
 import { Button } from "@/components/ui/button"
@@ -48,18 +49,27 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { isGatewayDepositRecipient } from "@/lib/constants/chains"
 import { shortenAddress, getExplorerUrl } from "@/lib/utils/data-formatters"
 import { useBalanceContext } from "@/lib/contexts/balance-context"
+import { VaultLink } from "@/components/earn/vault-link"
 
 const ITEMS_PER_PAGE = 10
 
 type ActivityItem = {
   id: string
-  type: "wallet_created" | "transfer" | "deposit" | "rebalance"
+  type:
+    | "wallet_created"
+    | "transfer"
+    | "deposit"
+    | "withdrawal"
+    | "rebalance"
   title: string
   amount?: number
   blockchain?: string
   address?: string
   secondaryAddress?: string
   txHash?: string
+  /** Set for Earn deposits/withdrawals: the vault's address, so the row links
+   * to the vault detail page instead of showing a raw wallet→vault pair. */
+  vaultAddress?: string
   timestamp: string
 }
 
@@ -112,12 +122,26 @@ function ActivityContent() {
       let type: ActivityItem["type"] = "transfer"
       let title = "Transfer"
 
+      // The badge conveys the action (Deposit/Withdrawal); the title conveys the
+      // source (Gateway/Vault), so we avoid redundant "Gateway Deposit" labels.
+      // For vault interactions the counterparty is the vault: it's the
+      // recipient on a deposit (wallet → vault) and the sender on a withdrawal
+      // (vault → wallet).
+      let vaultAddress: string | undefined
       if (tx.type === "REBALANCE") {
         type = "rebalance"
         title = "Rebalance"
+      } else if (tx.type === "EARN_DEPOSIT") {
+        type = "deposit"
+        title = "Vault"
+        vaultAddress = tx.recipient_address
+      } else if (tx.type === "EARN_WITHDRAW") {
+        type = "withdrawal"
+        title = "Vault"
+        vaultAddress = tx.sender_address
       } else if (isDeposit) {
         type = "deposit"
-        title = "Gateway Deposit"
+        title = "Gateway"
       }
 
       const senderWallet = fullWallets.find(
@@ -132,6 +156,7 @@ function ActivityContent() {
         blockchain: senderWallet?.blockchain || tx.blockchain,
         address: tx.sender_address,
         secondaryAddress: tx.recipient_address,
+        vaultAddress,
         timestamp: tx.created_at,
       }
     })
@@ -201,6 +226,8 @@ function ActivityContent() {
     switch (type) {
       case "deposit":
         return <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800"><IconPlus className="mr-1 size-3" /> Deposit</Badge>
+      case "withdrawal":
+        return <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100 border-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:border-rose-800"><IconMinus className="mr-1 size-3" /> Withdrawal</Badge>
       case "transfer":
         return <Badge variant="secondary">Transfer</Badge>
       case "rebalance":
@@ -308,6 +335,11 @@ function ActivityContent() {
                           >
                             {shortenAddress(item.address || "")}
                           </a>
+                        ) : item.vaultAddress ? (
+                          <VaultLink
+                            address={item.vaultAddress}
+                            onClick={(e) => e.stopPropagation()}
+                          />
                         ) : (
                           <>
                             <a
