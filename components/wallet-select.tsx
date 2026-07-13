@@ -76,6 +76,14 @@ interface WalletSelectProps {
    * USDC (the dashboard's summary balance).
    */
   token?: Currency
+  /**
+   * Fetch EURC balances in the background even while `token` is "USDC".
+   * Use this when the caller offers a currency toggle next to this dropdown
+   * (e.g. `SendButton`) so switching to EURC doesn't have to wait on a fresh
+   * fetch — without it the wallet list briefly filters down to nothing (or
+   * empties out under `minBalance`) until the EURC balances land.
+   */
+  prefetchEurc?: boolean
   /** Bump this (e.g. after a swap/transfer completes) to force an EURC balance refetch. */
   refreshKey?: number | string
 }
@@ -94,6 +102,7 @@ export function WalletSelect({
   excludeArcWallets = false,
   minBalance,
   token = "USDC",
+  prefetchEurc = false,
   refreshKey,
 }: WalletSelectProps) {
   const [wallets, setWallets] = React.useState<WalletOption[]>([])
@@ -111,24 +120,41 @@ export function WalletSelect({
   }
 
   // "USDC" reads from the shared context (no extra fetch). "EURC" fetches
-  // directly for just the wallets this dropdown ends up showing.
+  // directly for just the wallets this dropdown ends up showing. When
+  // `prefetchEurc` is set we kick this off as soon as wallets are known,
+  // regardless of the currently selected `token`, so a later toggle to EURC
+  // has data ready instead of showing an empty list while it loads.
   const [eurcBalances, setEurcBalances] = React.useState<Record<string, string>>({})
+  const [isLoadingEurc, setIsLoadingEurc] = React.useState(false)
   React.useEffect(() => {
-    if (token !== "EURC" || wallets.length === 0) return
+    if ((token !== "EURC" && !prefetchEurc) || wallets.length === 0) return
     let cancelled = false
-    fetchWalletBalance(wallets, "EURC")
+    // `setIsLoadingEurc(true)` is deferred into the promise chain (rather than
+    // called synchronously here) so this effect doesn't trigger a cascading
+    // render on every run.
+    Promise.resolve()
+      .then(() => {
+        if (!cancelled) setIsLoadingEurc(true)
+        return fetchWalletBalance(wallets, "EURC")
+      })
       .then((balances) => {
         if (!cancelled) setEurcBalances(balances)
       })
       .catch((error) => {
         console.error("Error fetching EURC balances:", error)
       })
+      .finally(() => {
+        if (!cancelled) setIsLoadingEurc(false)
+      })
     return () => {
       cancelled = true
     }
-  }, [token, wallets, refreshKey])
+  }, [token, prefetchEurc, wallets, refreshKey])
 
   const walletBalances = token === "EURC" ? eurcBalances : contextWalletBalances
+  // Only relevant while displaying EURC: true for the brief window (if any)
+  // where the currency was toggled before the prefetch above resolved.
+  const balancesLoading = token === "EURC" && isLoadingEurc
 
   React.useEffect(() => {
     const fetchWallets = async () => {
@@ -186,7 +212,10 @@ export function WalletSelect({
       result = result.filter((w) => w.blockchain !== "ARC-TESTNET")
     }
 
-    if (minBalance !== undefined) {
+    // Skip the balance filter while EURC balances are still in flight —
+    // otherwise every wallet looks like it has a zero balance and the list
+    // flashes empty until the fetch resolves.
+    if (minBalance !== undefined && !balancesLoading) {
       result = result.filter((w) => {
         const balanceStr = walletBalances[w.circle_wallet_id]
         if (!balanceStr) return false
@@ -209,7 +238,7 @@ export function WalletSelect({
     })
 
     return result
-  }, [wallets, chainFilter, excludeChain, excludeAddress, excludeWallet, excludeGatewaySigner, excludeArcWallets, minBalance, walletBalances])
+  }, [wallets, chainFilter, excludeChain, excludeAddress, excludeWallet, excludeGatewaySigner, excludeArcWallets, minBalance, walletBalances, balancesLoading])
 
   // Helper to format chain names nicely
   const formatChainName = (chain: string) => {
@@ -236,10 +265,10 @@ export function WalletSelect({
           }
         }
       }}
-      disabled={disabled || isLoading}
+      disabled={disabled || isLoading || balancesLoading}
     >
       <SelectTrigger className="w-full">
-        <SelectValue placeholder={isLoading ? "Loading wallets..." : placeholder} />
+        <SelectValue placeholder={isLoading || balancesLoading ? "Loading wallets..." : placeholder} />
       </SelectTrigger>
       <SelectContent>
         {displayedWallets.map((wallet) => (

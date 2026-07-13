@@ -311,7 +311,7 @@ export function SendButton() {
             <IconChevronDown />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-80">
+        <PopoverContent className="min-w-100 w-auto">
           <div className="grid gap-4">
             <div className="space-y-2">
               <h4 className="leading-none font-medium">Send USDC to external wallet</h4>
@@ -444,6 +444,7 @@ export function SendButton() {
                     minBalance={0}
                     chainFilter={BLOCKCHAIN_MAP[destinationChain]}
                     token={currency}
+                    prefetchEurc
                   />
                   {selectedWalletId && selectedWallet && (
                     <p className="text-xs text-muted-foreground">
