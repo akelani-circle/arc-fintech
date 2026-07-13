@@ -272,7 +272,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
     // Resolves as soon as the source-chain burn is broadcast. Once the burn is
     // on-chain, CCTP + the forwarder complete the transfer server-side at
     // Circle independently of this HTTP request, and the destination-mint
-    // webhook reconciles the row to COMPLETE (see app/api/webhooks/circle).
+    // webhook reconciles the row to COMPLETE (see app/api/circle/webhook).
     // So we can respond the moment the burn lands instead of blocking the whole
     // request on FAST/forwarder settlement (1-3 min) — which is what left the
     // rebalance dialog spinning indefinitely under `next dev`, where the
