@@ -43,6 +43,8 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Separator } from "@/components/ui/separator";
 import { WalletSelect, WalletOption } from "@/components/wallet-select";
+import { CurrencyToggle } from "@/components/currency-toggle";
+import type { Currency } from "@/lib/constants/currency";
 import { useBalanceContext } from "@/lib/contexts/balance-context";
 import { useComplianceCheck } from "@/components/dialogs/use-compliance-check";
 
@@ -83,6 +85,16 @@ export function SendButton() {
   const [selectedWalletId, setSelectedWalletId] = useState<string>("");
   const [selectedWallet, setSelectedWallet] = useState<WalletOption | null>(null);
   const [walletSelectValue, setWalletSelectValue] = useState("");
+  const [currency, setCurrency] = useState<Currency>("USDC");
+
+  // The currency toggle only makes sense for a true same-chain wallet-sourced
+  // payout — everything else (auto, gateway, or a wallet on a different chain
+  // than the destination) settles through Gateway's burn/mint, which is
+  // USDC-only.
+  const isSameChainWalletPayout =
+    sourceType === "wallet" &&
+    !!selectedWallet &&
+    selectedWallet.blockchain === BLOCKCHAIN_MAP[destinationChain];
   
   const [showComplianceDetails, setShowComplianceDetails] = useState(false);
   const [showReviewWarning, setShowReviewWarning] = useState(false);
@@ -118,6 +130,14 @@ export function SendButton() {
   if (prevInternalAddr !== address) {
     setPrevInternalAddr(address);
     setIsInternalWallet(false);
+  }
+
+  // Force back to USDC the moment the source stops being a true same-chain
+  // wallet payout, so a stale EURC selection can't leak into a Gateway send.
+  const [prevSameChain, setPrevSameChain] = useState(isSameChainWalletPayout);
+  if (prevSameChain !== isSameChainWalletPayout) {
+    setPrevSameChain(isSameChainWalletPayout);
+    if (!isSameChainWalletPayout) setCurrency("USDC");
   }
 
   useEffect(() => {
@@ -195,6 +215,10 @@ export function SendButton() {
         requestBody.sourceWalletId = selectedWalletId;
       }
 
+      if (isSameChainWalletPayout) {
+        requestBody.currency = currency;
+      }
+
       const response = await fetch("/api/payout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -258,6 +282,7 @@ export function SendButton() {
   const resetForm = () => {
     setAddress("");
     setAmount("1");
+    setCurrency("USDC");
     setShowReviewWarning(false);
     setIsInternalWallet(false);
     setShowComplianceDetails(false);
@@ -418,14 +443,22 @@ export function SendButton() {
                     excludeGatewaySigner
                     minBalance={0}
                     chainFilter={BLOCKCHAIN_MAP[destinationChain]}
+                    token={currency}
                   />
                   {selectedWalletId && selectedWallet && (
                     <p className="text-xs text-muted-foreground">
                       {selectedWallet.blockchain === BLOCKCHAIN_MAP[destinationChain]
-                        ? "✓ Same-chain transfer (lower fees)" 
+                        ? "✓ Same-chain transfer (lower fees)"
                         : "Cross-chain transfer via Gateway"}
                     </p>
                   )}
+                </div>
+              )}
+
+              {isSameChainWalletPayout && (
+                <div className="flex flex-col gap-2">
+                  <Label>Currency</Label>
+                  <CurrencyToggle value={currency} onChange={setCurrency} />
                 </div>
               )}
 

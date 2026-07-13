@@ -50,6 +50,7 @@ import {
   BLOCKCHAIN_BY_SDK_CHAIN as CHAIN_TO_BLOCKCHAIN,
   CHAIN_LABEL_BY_SDK_CHAIN as CHAIN_LABELS,
 } from "@/lib/constants/chains";
+import type { Currency } from "@/lib/constants/currency";
 import type { Address } from "viem";
 
 function convertToSmallestUnit(amount: string): string {
@@ -77,12 +78,12 @@ interface WalletBalance {
 export const POST = withAuth(async (req, { user, supabase }) => {
   try {
     const body = await req.json();
-    const { 
-      recipientAddress, 
-      amount, 
+    const {
+      recipientAddress,
+      amount,
       destinationChain: requestedChain,
       sourceType = "auto",
-      sourceWalletId 
+      sourceWalletId
     } = body;
 
     if (!recipientAddress || !amount) {
@@ -91,6 +92,14 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         { status: 400 }
       );
     }
+
+    // The currency toggle only applies to a true same-chain wallet-sourced
+    // payout (the `else` branch below, calling sendUsdcOnSameChainWithAppKit
+    // directly). "auto" mode picks its wallet by USDC balance, and any
+    // cross-chain/"gateway" path settles through Gateway's burn/mint, which
+    // is USDC-only — so this is silently ignored for anything but an
+    // explicit same-chain wallet source.
+    const requestedCurrency: Currency = body.currency === "EURC" ? "EURC" : "USDC";
 
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum) || amountNum <= 0) {
@@ -553,6 +562,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
     // Execute transfer
     let txId: string;
     let txHash: string | undefined;
+    let transactionCurrency: Currency = "USDC";
 
     if (useGateway) {
       // Use Gateway with EOA signing (no Circle wallet needed for burn, only for mint)
@@ -721,12 +731,16 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       txHash = mintTx.txHash as string;
       console.log(`Gateway transfer completed. Mint TX: ${txHash}`);
     } else {
+      // Only an explicit wallet-sourced same-chain payout can honor a
+      // non-USDC currency (see note above); everything else stays USDC.
+      transactionCurrency = sourceType === "wallet" ? requestedCurrency : "USDC";
       try {
         const sameChainSendResult = await sendUsdcOnSameChainWithAppKit({
           sourceBlockchain: sourceWallet.blockchain,
           sourceWalletAddress: sourceWallet.address,
           recipientAddress,
           amount: amountNum.toString(),
+          token: transactionCurrency,
         });
 
         txId = sameChainSendResult.txId;
@@ -762,6 +776,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         circle_transaction_id: txId,
         blockchain: CHAIN_TO_BLOCKCHAIN[destinationChain],
         type: "OUTBOUND",
+        currency: transactionCurrency,
         status: "PENDING",
       },
     ]);

@@ -75,9 +75,12 @@ export default function Page() {
   const {
     walletBalances,
     walletTotal,
+    eurcWalletBalances,
+    eurcWalletTotal,
     gatewayTotal,
     gatewayPending,
     isLoadingWallet,
+    isLoadingEurcWallet,
     isLoadingGateway,
     isLoadingData,
     fullWallets,
@@ -160,6 +163,16 @@ export default function Page() {
                 <Skeleton className="h-6 w-20" />
               )}
             </h3>
+            <div className="text-muted-foreground flex items-center gap-2 text-lg">
+              <span>EURC Balance</span>
+              {!isLoadingEurcWallet ? (
+                <span>
+                  €{eurcWalletTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              ) : (
+                <Skeleton className="h-4 w-16" />
+              )}
+            </div>
             <div className="text-muted-foreground flex items-center gap-2 text-lg">
               <span>Gateway Balance</span>
               {!isLoadingGateway ? (
@@ -318,6 +331,7 @@ export default function Page() {
               <>
                 {localWallets.slice(0, 5).map((wallet) => {
                   const balance = walletBalances[wallet.circle_wallet_id]
+                  const eurcBalance = eurcWalletBalances[wallet.circle_wallet_id]
 
                   return (
                     <div key={wallet.id} className="flex items-start gap-4">
@@ -340,6 +354,13 @@ export default function Page() {
                         {balance !== undefined ? (
                           <p className="text-muted-foreground text-xs">
                             {balance}
+                          </p>
+                        ) : (
+                          <Skeleton className="h-3 w-10 rounded-sm mt-1" />
+                        )}
+                        {eurcBalance !== undefined ? (
+                          <p className="text-muted-foreground text-xs">
+                            {eurcBalance}
                           </p>
                         ) : (
                           <Skeleton className="h-3 w-10 rounded-sm mt-1" />

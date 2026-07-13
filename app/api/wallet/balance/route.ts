@@ -27,6 +27,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
     // Extract walletIds from the request body
     const body = await req.json();
     let walletIds: string[] = body?.walletIds;
+    const token: "USDC" | "EURC" = body?.token === "EURC" ? "EURC" : "USDC";
 
     if (!walletIds || !Array.isArray(walletIds) || walletIds.length === 0) {
       return NextResponse.json({ error: "Invalid walletIds provided" }, { status: 400 });
@@ -92,19 +93,23 @@ export const POST = withAuth(async (req, { user, supabase }) => {
           // The SDK returns an array of token balances for this specific wallet
           const tokenBalances = response.data?.tokenBalances || [];
 
-          // Strictly look for USDC (USDC-TESTNET included)
-          const usdcBalance = tokenBalances.find((b) => b.token.symbol?.startsWith("USDC"));
+          // USDC symbols come back as "USDC" or "USDC-TESTNET"; EURC is exact.
+          const tokenBalance =
+            token === "USDC"
+              ? tokenBalances.find((b) => b.token.symbol?.startsWith("USDC"))
+              : tokenBalances.find((b) => b.token.symbol === "EURC");
 
-          if (usdcBalance) {
-            const amount = parseFloat(usdcBalance.amount).toFixed(2);
-            balancesMap[id] = `$${amount}${chainSuffix}`;
+          const symbol = token === "EURC" ? "€" : "$";
+          if (tokenBalance) {
+            const amount = parseFloat(tokenBalance.amount).toFixed(2);
+            balancesMap[id] = `${symbol}${amount}${chainSuffix}`;
           } else {
-            balancesMap[id] = `$0.00${chainSuffix}`;
+            balancesMap[id] = `${symbol}0.00${chainSuffix}`;
           }
         } catch (innerError) {
           console.error(`Failed to fetch balance for wallet ${id}:`, innerError);
-          // We default to $0.00 if fetching fails for a specific wallet
-          balancesMap[id] = `$0.00${chainSuffix}`;
+          // We default to 0.00 if fetching fails for a specific wallet
+          balancesMap[id] = `${token === "EURC" ? "€" : "$"}0.00${chainSuffix}`;
         }
       })
     );

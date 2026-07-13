@@ -39,11 +39,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertTriangle, Info } from "lucide-react";
 import { toast } from "sonner";
 import { WalletSelect, type WalletOption } from "@/components/wallet-select";
+import { CurrencyToggle } from "@/components/currency-toggle";
+import type { Currency } from "@/lib/constants/currency";
 import { useComplianceCheck } from "@/components/dialogs/use-compliance-check";
 
 export function TransferDialog() {
   const [open, setOpen] = useState(false);
   const [sourceWallet, setSourceWallet] = useState<WalletOption | null>(null);
+  const [currency, setCurrency] = useState<Currency>("USDC");
   const [amount, setAmount] = useState("1");
   const [recipientAddress, setRecipientAddress] = useState("");
   const [recipientCompositeValue, setRecipientCompositeValue] = useState("");
@@ -107,6 +110,7 @@ export function TransferDialog() {
           sourceWalletId: sourceWallet.circle_wallet_id,
           destinationAddress: recipientAddress,
           amount,
+          currency,
         }),
       });
 
@@ -117,7 +121,7 @@ export function TransferDialog() {
       }
 
       toast.success("Transfer initiated", {
-        description: `Transferring ${amount} USDC on ${sourceWallet.blockchain}`,
+        description: `Transferring ${amount} ${currency} on ${sourceWallet.blockchain}`,
       });
       setOpen(false);
       resetForm();
@@ -133,6 +137,7 @@ export function TransferDialog() {
 
   const resetForm = () => {
     setSourceWallet(null);
+    setCurrency("USDC");
     setAmount("1");
     setRecipientAddress("");
     setRecipientCompositeValue("");
@@ -179,6 +184,17 @@ export function TransferDialog() {
                   placeholder="Select source wallet"
                   disabled={isTransferring}
                   excludeGatewaySigner={true}
+                  token={currency}
+                />
+              </div>
+
+              {/* Currency Toggle */}
+              <div className="flex flex-col gap-2">
+                <Label>Currency</Label>
+                <CurrencyToggle
+                  value={currency}
+                  onChange={setCurrency}
+                  disabled={isTransferring}
                 />
               </div>
 

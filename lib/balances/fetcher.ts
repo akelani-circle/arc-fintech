@@ -129,9 +129,14 @@ export async function fetchGatewayBalance(
  * Calls `/api/wallet/balance` for a set of wallets and returns the raw
  * `{ [walletId]: balanceString }` map. Caller is responsible for merging with
  * any prior balances and computing per-address totals.
+ *
+ * `token` defaults to "USDC" (the balance context's own usage). Pass "EURC"
+ * to fetch the EURC-denominated balance instead — used by dialogs that offer
+ * a currency toggle (see `components/currency-toggle.tsx`).
  */
 export async function fetchWalletBalance(
-  wallets: Wallet[]
+  wallets: Wallet[],
+  token: "USDC" | "EURC" = "USDC"
 ): Promise<Record<string, string>> {
   if (!wallets || wallets.length === 0) return {}
 
@@ -139,7 +144,7 @@ export async function fetchWalletBalance(
   const res = await fetch("/api/wallet/balance", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ walletIds }),
+    body: JSON.stringify({ walletIds, token }),
   })
   if (!res.ok) throw new Error("Failed to fetch wallet balance")
 
@@ -159,7 +164,7 @@ export function computeWalletTotal(
   wallets.forEach((wallet) => {
     const balance = balances[wallet.circle_wallet_id]
     if (typeof balance !== "string") return
-    const numericPart = balance.split(" ")[0].replace(/[$,]/g, "")
+    const numericPart = balance.split(" ")[0].replace(/[$€,]/g, "")
     const num = parseFloat(numericPart)
     if (Number.isNaN(num)) return
     const key = `${wallet.address.toLowerCase()}-${wallet.blockchain}`
