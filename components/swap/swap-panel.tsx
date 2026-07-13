@@ -33,13 +33,12 @@ import { otherCurrency, type Currency } from "@/lib/constants/currency"
 import { useBalanceContext } from "@/lib/contexts/balance-context"
 import { parseBalanceAmount } from "@/lib/balances/fetcher"
 import { trimAmount } from "@/lib/earn/format"
+import { SWAP_SLIPPAGE_BPS } from "@/lib/constants/swap"
 
 type QuoteState =
   | { ok: true; amountOut: string; effectiveRate: string }
   | { ok: false; error: string }
   | null
-
-const SLIPPAGE_BPS = 300 // 3%, App Kit's own default
 
 export function SwapPanel() {
   const [wallet, setWallet] = useState<WalletOption | null>(null)
@@ -153,7 +152,6 @@ export function SwapPanel() {
           tokenIn,
           tokenOut,
           amountIn,
-          slippageBps: SLIPPAGE_BPS,
         }),
       })
       const data = await res.json()
@@ -322,7 +320,7 @@ export function SwapPanel() {
             </div>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Slippage</dt>
-              <dd>{(SLIPPAGE_BPS / 100).toFixed(2)}%</dd>
+              <dd>{(SWAP_SLIPPAGE_BPS / 100).toFixed(2)}%</dd>
             </div>
           </dl>
           <DialogFooter>

@@ -31,7 +31,8 @@ const bodySchema = z
       .string()
       .regex(/^\d*\.?\d+$/, "Amount must be a positive decimal")
       .refine((v) => Number(v) > 0, "Amount must be greater than zero"),
-    slippageBps: z.number().int().min(0).max(10_000).default(300),
+    // Note: no `slippageBps`. It is server policy (SWAP_SLIPPAGE_BPS), not a
+    // caller input — accepting one would let a client ask for 100% tolerance.
   })
   .refine((v) => v.tokenIn !== v.tokenOut, {
     message: "tokenIn and tokenOut must differ",
@@ -41,7 +42,7 @@ const bodySchema = z
 export const POST = withAuth(async (req, { user, supabase }) => {
   const parsed = await validateJsonBody(req, bodySchema)
   if (!parsed.ok) return parsed.response
-  const { walletId, tokenIn, tokenOut, amountIn, slippageBps } = parsed.data
+  const { walletId, tokenIn, tokenOut, amountIn } = parsed.data
 
   const wallet = await resolveSwapWallet(supabase, user.id, walletId)
   if (!wallet.ok) {
@@ -54,7 +55,6 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       tokenIn,
       tokenOut,
       amountIn,
-      slippageBps,
     })
 
     const { error: insertError } = await supabase.from("transactions").insert([

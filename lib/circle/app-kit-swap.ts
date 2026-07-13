@@ -29,6 +29,7 @@ import {
   type CircleWalletsAdapter,
 } from "@circle-fin/adapter-circle-wallets"
 import type { Currency } from "@/lib/constants/currency"
+import { SWAP_SLIPPAGE_BPS } from "@/lib/constants/swap"
 
 export const SWAP_BLOCKCHAIN = "ARC-TESTNET" as const
 
@@ -132,7 +133,9 @@ export async function estimateSwap({
     tokenIn,
     tokenOut,
     amountIn,
-    config: swapConfig(),
+    // Same slippage the execute path will apply, so the quote the user is
+    // shown is priced under the same terms the swap actually runs under.
+    config: { ...swapConfig(), slippageBps: SWAP_SLIPPAGE_BPS },
   })
 
   const amountOut = result.estimatedOutput.amount
@@ -143,9 +146,11 @@ export async function estimateSwap({
   return { amountOut, effectiveRate }
 }
 
-export type SwapExecuteInput = SwapQuoteInput & {
-  slippageBps: number
-}
+/**
+ * Slippage is deliberately absent: it is server policy (`SWAP_SLIPPAGE_BPS`),
+ * not a caller-supplied value.
+ */
+export type SwapExecuteInput = SwapQuoteInput
 
 export type SwapExecuteResult = {
   amountOut?: string
@@ -157,14 +162,13 @@ export async function executeSwap({
   tokenIn,
   tokenOut,
   amountIn,
-  slippageBps,
 }: SwapExecuteInput): Promise<SwapExecuteResult> {
   const result: SwapResult = await getAppKit().swap({
     from: fromContext(walletAddress),
     tokenIn,
     tokenOut,
     amountIn,
-    config: { ...swapConfig(), slippageBps },
+    config: { ...swapConfig(), slippageBps: SWAP_SLIPPAGE_BPS },
   })
 
   return {
