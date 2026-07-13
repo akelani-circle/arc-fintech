@@ -156,15 +156,16 @@ export default function Page() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="scroll-m-20 text-3xl tracking-tight flex items-center">
-              <span className="mr-2">Balance</span>
+              <span className="mr-2">USDC Balance</span>
               {!isLoadingWallet ? (
                 `$${walletTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
               ) : (
                 <Skeleton className="h-6 w-20" />
               )}
             </h3>
-            <div className="text-muted-foreground flex items-center gap-2 text-lg">
-              <span>EURC Balance</span>
+            <div>
+               <h3 className="scroll-m-20 text-3xl tracking-tight flex items-center">
+              <span className="mr-2">EURC Balance</span>
               {!isLoadingEurcWallet ? (
                 <span>
                   €{eurcWalletTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -172,6 +173,7 @@ export default function Page() {
               ) : (
                 <Skeleton className="h-4 w-16" />
               )}
+              </h3>
             </div>
             <div className="text-muted-foreground flex items-center gap-2 text-lg">
               <span>Gateway Balance</span>

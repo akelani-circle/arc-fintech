@@ -36,7 +36,7 @@ const CHAIN_CONFIG = [
 ] as const
 
 export function SectionCards() {
-  const { chainBalances, isLoadingGateway } = useBalanceContext()
+  const { chainBalances, eurcChainBalances, isLoadingGateway } = useBalanceContext()
 
   return (
     <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 *:data-[slot=card]:bg-linear-to-t *:data-[slot=card]:shadow-xs @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
@@ -49,6 +49,16 @@ export function SectionCards() {
                 <Skeleton className="h-8 w-24" />
               ) : (
                 `$${(chainBalances[chain.key] || 0).toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}`
+              )}
+            </CardTitle>
+            <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+              {isLoadingGateway ? (
+                <Skeleton className="h-8 w-24" />
+              ) : (
+                `€${(eurcChainBalances[chain.key] || 0).toLocaleString("en-US", {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
                 })}`

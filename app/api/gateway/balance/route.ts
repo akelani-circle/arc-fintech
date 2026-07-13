@@ -18,7 +18,7 @@
 
 import { NextResponse } from "next/server";
 import type { Address } from "viem";
-import { getUsdcBalance, DOMAIN_IDS, type SupportedChain } from "@/lib/circle/gateway-sdk";
+import { getUsdcBalance, getTokenBalance, DOMAIN_IDS, type SupportedChain } from "@/lib/circle/gateway-sdk";
 import { getAppKit, getCircleWalletsAdapter } from "@/lib/circle/app-kit";
 import {
   BLOCKCHAIN_BY_APP_KIT_CHAIN,
@@ -179,6 +179,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       }
 
       const chainBalances = [];
+      const eurcChainBalances = [];
       for (const chain of SUPPORTED_CHAINS) {
         try {
           const balance = await getUsdcBalance(address as Address, chain);
@@ -191,6 +192,18 @@ export const POST = withAuth(async (req, { user, supabase }) => {
           console.error(`Error fetching on-chain balance for ${chain}:`, error);
           chainBalances.push({ chain, balance: 0, address });
         }
+
+        try {
+          const eurcBalance = await getTokenBalance(address as Address, chain, "EURC");
+          eurcChainBalances.push({
+            chain,
+            balance: Number(eurcBalance) / 1_000_000,
+            address,
+          });
+        } catch (error) {
+          console.error(`Error fetching on-chain EURC balance for ${chain}:`, error);
+          eurcChainBalances.push({ chain, balance: 0, address });
+        }
       }
 
       const walletTotal = chainBalances.reduce((sum, cb) => sum + cb.balance, 0);
@@ -201,6 +214,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         gatewayTotal,
         gatewayPending,
         chainBalances,
+        eurcChainBalances,
         walletTotal,
         totalBalance: gatewayTotal + walletTotal,
       });

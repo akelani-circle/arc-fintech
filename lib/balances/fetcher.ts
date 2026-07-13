@@ -37,6 +37,7 @@ type GatewayBalanceWalletResult = {
   gatewayPending?: number
   gatewayBalances?: GatewayChainBalanceItem[]
   chainBalances?: ChainBalanceItem[]
+  eurcChainBalances?: ChainBalanceItem[]
 }
 
 type GatewayBalanceResponse = {
@@ -51,6 +52,8 @@ export type GatewayBalanceSummary = {
    * user has *not* yet deposited into Gateway.
    */
   totals: ChainBalances
+  /** On-wallet EURC totals per chain (viem `balanceOf`). Same shape as `totals`. */
+  eurcTotals: ChainBalances
   /** Sum of confirmed Gateway balances across every chain and address. */
   grandTotal: number
   /** Sum of pending Gateway balances across every chain and address. */
@@ -70,6 +73,7 @@ export async function fetchGatewayBalance(
 ): Promise<GatewayBalanceSummary> {
   const empty: GatewayBalanceSummary = {
     totals: { ...EMPTY_CHAIN_BALANCES },
+    eurcTotals: { ...EMPTY_CHAIN_BALANCES },
     grandTotal: 0,
     pendingTotal: 0,
     gatewayTotals: { ...EMPTY_CHAIN_BALANCES },
@@ -88,6 +92,7 @@ export async function fetchGatewayBalance(
   const data: GatewayBalanceResponse = await res.json()
   const summary: GatewayBalanceSummary = {
     totals: { ...EMPTY_CHAIN_BALANCES },
+    eurcTotals: { ...EMPTY_CHAIN_BALANCES },
     grandTotal: 0,
     pendingTotal: 0,
     gatewayTotals: { ...EMPTY_CHAIN_BALANCES },
@@ -103,6 +108,14 @@ export async function fetchGatewayBalance(
         walletResult.chainBalances.forEach((cb) => {
           if (summary.totals[cb.chain as keyof ChainBalances] !== undefined) {
             summary.totals[cb.chain as keyof ChainBalances] += cb.balance
+          }
+        })
+      }
+
+      if (walletResult.eurcChainBalances && Array.isArray(walletResult.eurcChainBalances)) {
+        walletResult.eurcChainBalances.forEach((cb) => {
+          if (summary.eurcTotals[cb.chain as keyof ChainBalances] !== undefined) {
+            summary.eurcTotals[cb.chain as keyof ChainBalances] += cb.balance
           }
         })
       }

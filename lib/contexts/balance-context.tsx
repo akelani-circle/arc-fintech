@@ -61,6 +61,8 @@ type BalanceContextType = {
    * These are funds the user has not yet deposited into Gateway.
    */
   chainBalances: ChainBalances
+  /** Same shape as `chainBalances`, denominated in EURC. */
+  eurcChainBalances: ChainBalances
   /** Confirmed Gateway balance per chain. */
   gatewayChainBalances: ChainBalances
   /** Pending Gateway balance per chain. */
@@ -127,6 +129,9 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
   const [chainBalances, setChainBalances] = useState<ChainBalances>({
     ...EMPTY_CHAIN_BALANCES,
   })
+  const [eurcChainBalances, setEurcChainBalances] = useState<ChainBalances>({
+    ...EMPTY_CHAIN_BALANCES,
+  })
   const [gatewayChainBalances, setGatewayChainBalances] = useState<ChainBalances>({
     ...EMPTY_CHAIN_BALANCES,
   })
@@ -164,6 +169,8 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
       const summary = await fetchGatewayBalanceApi(currentWallets)
       // `totals` is on-wallet (un-deposited) USDC per chain via viem.
       setChainBalances(summary.totals)
+      // `eurcTotals` is the EURC equivalent of `totals`.
+      setEurcChainBalances(summary.eurcTotals)
       // `gatewayTotals` is confirmed Gateway balance per chain via App Kit.
       setGatewayChainBalances(summary.gatewayTotals)
       setGatewayPendingChainBalances(summary.gatewayPendingTotals)
@@ -495,6 +502,7 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
     <BalanceContext.Provider
       value={{
         chainBalances,
+        eurcChainBalances,
         gatewayChainBalances,
         gatewayPendingChainBalances,
         gatewayTotal,
