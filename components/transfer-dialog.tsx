@@ -312,16 +312,20 @@ export function TransferDialog() {
               </Button>
             </DialogFooter>
           </form>
+
+          {/* Rendered as a child of DialogContent (not a sibling of Dialog) so
+              React's portal-aware event bubbling lets this dialog's outer
+              DismissableLayer recognize clicks inside the compliance dialog
+              as "inside its own tree" instead of an outside interaction that
+              would otherwise close both dialogs. */}
+          <ComplianceDetailsDialog
+            open={showComplianceDetails}
+            onOpenChange={setShowComplianceDetails}
+            complianceData={complianceData}
+            address={recipientAddress}
+          />
         </DialogContent>
       </Dialog>
-
-      {/* Compliance Details Dialog */}
-      <ComplianceDetailsDialog
-        open={showComplianceDetails}
-        onOpenChange={setShowComplianceDetails}
-        complianceData={complianceData}
-        address={recipientAddress}
-      />
     </>
   );
 }
