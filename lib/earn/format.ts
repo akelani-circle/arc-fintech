@@ -47,6 +47,34 @@ export function formatTokenAmount(
   return `${formatted} ${symbol}`
 }
 
+/**
+ * Format a P&L / yield amount for display. Rounds to `maxFrac` decimals like a
+ * fiat balance (2 for USDC), so the sub-unit rounding dust ERC-4626 vaults leave
+ * on a fresh deposit - e.g. a 10 USDC deposit reading back as 9.999997, i.e.
+ * -0.000003 "yield" - collapses to "0.00" instead of surfacing as a misleading
+ * signed value. The returned `sign` is derived from the *rounded* number so
+ * callers color the row from what the user actually sees: dust reads neutral,
+ * while a real loss larger than the display precision still rounds through as
+ * negative and is colored as a loss.
+ */
+export function formatYieldAmount(
+  amount: string | number,
+  symbol: string,
+  maxFrac = 2
+): { text: string; sign: "positive" | "negative" | "zero" } {
+  const n = typeof amount === "string" ? Number(amount) : amount
+  if (!Number.isFinite(n)) return { text: `0.00 ${symbol}`, sign: "zero" }
+  const factor = 10 ** maxFrac
+  const rounded = Math.round(n * factor) / factor
+  const sign = rounded > 0 ? "positive" : rounded < 0 ? "negative" : "zero"
+  // Normalize -0 to 0 so a rounded-away negative never renders as "-0.00".
+  const text = new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: maxFrac,
+    maximumFractionDigits: maxFrac,
+  }).format(rounded === 0 ? 0 : rounded)
+  return { text: `${text} ${symbol}`, sign }
+}
+
 /** Truncate a decimal amount string for display without forcing trailing zeros. */
 export function trimAmount(amount: string | number, maxFrac = 6): string {
   const n = typeof amount === "string" ? Number(amount) : amount

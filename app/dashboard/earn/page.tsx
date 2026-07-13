@@ -41,14 +41,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { useEarnVaults } from "@/lib/earn/use-earn"
+import { useEarnVaults, useEarnPositions } from "@/lib/earn/use-earn"
+import { useHeaderContent } from "@/lib/contexts/header-title-context"
 import { formatApy, formatCompactUsd } from "@/lib/earn/format"
 import { shortenAddress } from "@/lib/utils/data-formatters"
 
 // Sortable columns. Sorting is client-side over the fetched page so the arrows
 // can cycle asc -> desc -> none; "none" falls back to the server's default order
 // (EarnKit's `exploreVaults` sorts by TVL and exposes no direction control).
-type SortKey = "name" | "deposits" | "liquidity" | "apy"
+type SortKey = "name" | "deposits" | "position" | "liquidity" | "apy"
 type SortConfig = { key: SortKey | null; direction: "asc" | "desc" | null }
 
 export default function EarnVaultsPage() {
@@ -61,6 +62,17 @@ export default function EarnVaultsPage() {
 
   // Asset is fixed to USDC - the only deposit asset this app funds wallets in.
   const { data, isLoading, isError, error } = useEarnVaults({ asset: "USDC" })
+
+  // "Your position" per vault, summed across the user's Arc wallets server-side.
+  // Keyed off the full fetched page (not the filtered/sorted view) so the query
+  // key stays stable while the user searches or re-sorts.
+  const vaultAddresses = React.useMemo(
+    () => (data?.vaults ?? []).map((v) => v.vaultAddress),
+    [data?.vaults]
+  )
+  const { data: positionsData, isLoading: positionsLoading } =
+    useEarnPositions(vaultAddresses)
+  const holdings = positionsData?.holdings
 
   const handleSort = (key: SortKey) => {
     setSortConfig((current) => {
@@ -93,6 +105,10 @@ export default function EarnVaultsPage() {
             return v.name.toLowerCase()
           case "deposits":
             return Number(v.totalDeposits || 0)
+          case "position": {
+            const holding = holdings?.[v.vaultAddress.toLowerCase()]
+            return holding?.hasPosition ? Number(holding.balance || 0) : 0
+          }
           case "liquidity":
             return Number(v.liquidity || 0)
           case "apy":
@@ -109,13 +125,41 @@ export default function EarnVaultsPage() {
     }
 
     return result
-  }, [data?.vaults, search, sortConfig])
+  }, [data?.vaults, search, sortConfig, holdings])
 
   const totalDeposits = React.useMemo(
     () =>
       (data?.vaults ?? []).reduce((sum, v) => sum + Number(v.totalDeposits || 0), 0),
     [data?.vaults]
   )
+
+  // "Your Deposits" - the user's own holdings summed across every vault.
+  const totalYourDeposits = React.useMemo(
+    () =>
+      Object.values(holdings ?? {}).reduce(
+        (sum, h) => sum + (h.hasPosition ? Number(h.balance || 0) : 0),
+        0
+      ),
+    [holdings]
+  )
+
+  // Surface both totals as right-aligned pills in the header bar beside the
+  // "Earn" title. Title is left unset so the static nav title still shows.
+  useHeaderContent({
+    stats: [
+      {
+        label: "Total Deposits",
+        value: isLoading ? "…" : formatCompactUsd(totalDeposits),
+      },
+      {
+        label: "Your Deposits",
+        value:
+          isLoading || (positionsLoading && !holdings)
+            ? "…"
+            : formatCompactUsd(totalYourDeposits),
+      },
+    ],
+  })
 
   const sortIcon = (columnKey: SortKey) => {
     if (sortConfig.key !== columnKey)
@@ -136,16 +180,6 @@ export default function EarnVaultsPage() {
             EarnKit.
           </p>
         </div>
-        <div className="rounded-lg border px-4 py-2">
-          <div className="text-muted-foreground text-xs">Total Deposits</div>
-          <div className="text-xl font-semibold">
-            {isLoading ? (
-              <Skeleton className="h-6 w-28" />
-            ) : (
-              formatCompactUsd(totalDeposits)
-            )}
-          </div>
-        </div>
       </div>
 
       {/* Filters */}
@@ -159,12 +193,6 @@ export default function EarnVaultsPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        {data?.permissioned && (
-          <Badge variant="outline" className="ml-auto gap-1 font-normal">
-            <IconShieldCheck className="size-3" />
-            Kit Key active
-          </Badge>
-        )}
       </div>
 
       {/* Table */}
@@ -190,6 +218,16 @@ export default function EarnVaultsPage() {
                 >
                   Deposits
                   {sortIcon("deposits")}
+                </Button>
+              </TableHead>
+              <TableHead className="text-right">
+                <Button
+                  variant="ghost"
+                  onClick={() => handleSort("position")}
+                  className="ml-auto h-auto p-0 font-medium hover:bg-transparent"
+                >
+                  Your position
+                  {sortIcon("position")}
                 </Button>
               </TableHead>
               <TableHead className="text-right">
@@ -221,6 +259,7 @@ export default function EarnVaultsPage() {
                 <TableRow key={i}>
                   <TableCell><Skeleton className="h-5 w-48" /></TableCell>
                   <TableCell className="text-right"><Skeleton className="ml-auto h-5 w-20" /></TableCell>
+                  <TableCell className="text-right"><Skeleton className="ml-auto h-5 w-16" /></TableCell>
                   <TableCell className="text-right"><Skeleton className="ml-auto h-5 w-20" /></TableCell>
                   <TableCell><Skeleton className="h-5 w-24" /></TableCell>
                   <TableCell className="text-right"><Skeleton className="ml-auto h-5 w-14" /></TableCell>
@@ -228,13 +267,13 @@ export default function EarnVaultsPage() {
               ))
             ) : isError ? (
               <TableRow>
-                <TableCell colSpan={5} className="h-24 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={6} className="h-24 text-center text-sm text-muted-foreground">
                   {error instanceof Error ? error.message : "Failed to load vaults."}
                 </TableCell>
               </TableRow>
             ) : vaults.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="h-24 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={6} className="h-24 text-center text-sm text-muted-foreground">
                   No vaults found.
                 </TableCell>
               </TableRow>
@@ -291,6 +330,19 @@ export default function EarnVaultsPage() {
                   </TableCell>
                   <TableCell className="text-right font-medium">
                     {formatCompactUsd(v.totalDeposits)}
+                  </TableCell>
+                  <TableCell className="text-right font-medium">
+                    {(() => {
+                      const holding = holdings?.[v.vaultAddress.toLowerCase()]
+                      if (holding?.hasPosition) {
+                        return formatCompactUsd(holding.balance)
+                      }
+                      // Once positions have loaded, no key means no deposit here.
+                      if (holdings || !positionsLoading) {
+                        return <span className="text-muted-foreground text-xs">-</span>
+                      }
+                      return <Skeleton className="ml-auto h-5 w-16" />
+                    })()}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex flex-col items-end">
