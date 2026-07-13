@@ -31,6 +31,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { WalletSelect, type WalletOption } from "@/components/wallet-select"
 import { otherCurrency, type Currency } from "@/lib/constants/currency"
 import { useBalanceContext } from "@/lib/contexts/balance-context"
+import { parseBalanceAmount } from "@/lib/balances/fetcher"
+import { trimAmount } from "@/lib/earn/format"
 
 type QuoteState =
   | { ok: true; amountOut: string; effectiveRate: string }
@@ -54,9 +56,25 @@ export function SwapPanel() {
   // SwapPanel only ever renders on /dashboard/swap, which is always wrapped
   // by BalanceProviderWrapper (see app/dashboard/layout.tsx), so this hook
   // doesn't need WalletSelect's defensive try/catch for a missing provider.
-  const { refreshWalletBalance } = useBalanceContext()
+  const { walletBalances, eurcWalletBalances, refreshWalletBalance } =
+    useBalanceContext()
 
-  const isValidInput = !!wallet && !!amountIn && Number(amountIn) > 0
+  // The sell input is bounded by the selected wallet's balance *in the token
+  // being sold*, so flipping the pair re-bounds it against the other map. The
+  // provider loads both maps up front, so no extra fetch is needed here.
+  const balancesForTokenIn = tokenIn === "EURC" ? eurcWalletBalances : walletBalances
+  const rawBalance = wallet
+    ? balancesForTokenIn[wallet.circle_wallet_id]
+    : undefined
+  // Distinguish "not loaded yet" from a genuine zero: an absent entry must not
+  // disable the input, or a slow balance fetch would look like an empty wallet.
+  const balanceLoaded = rawBalance !== undefined
+  const maxAmount = parseBalanceAmount(rawBalance)
+  const isEmpty = balanceLoaded && maxAmount <= 0
+
+  const overMax = maxAmount > 0 && Number(amountIn) > maxAmount
+  const isValidInput =
+    !!wallet && !!amountIn && Number(amountIn) > 0 && !overMax
 
   useEffect(() => {
     const id = ++requestId.current
@@ -105,6 +123,18 @@ export function SwapPanel() {
     setQuote(null)
   }
 
+  function selectWallet(next: WalletOption) {
+    setWallet(next)
+    // A different wallet has a different balance, so an amount typed against
+    // the previous one is no longer bounded by anything meaningful.
+    setAmountIn("")
+    setQuote(null)
+  }
+
+  function handleMax() {
+    if (maxAmount > 0) setAmountIn(trimAmount(maxAmount))
+  }
+
   function resetForm() {
     setAmountIn("")
     setQuote(null)
@@ -147,7 +177,13 @@ export function SwapPanel() {
 
   const displayedQuoting = isValidInput && quoting
   const canExecute =
-    !!wallet && displayedQuote?.ok === true && !displayedQuoting && !executing && Number(amountIn) > 0
+    !!wallet &&
+    displayedQuote?.ok === true &&
+    !displayedQuoting &&
+    !executing &&
+    Number(amountIn) > 0 &&
+    !overMax &&
+    !isEmpty
 
   return (
     <>
@@ -165,7 +201,7 @@ export function SwapPanel() {
             <WalletSelect
               value={wallet ? `${wallet.address}-${wallet.blockchain}` : ""}
               onValueChange={() => {}}
-              onSelectWallet={setWallet}
+              onSelectWallet={selectWallet}
               placeholder="Select an Arc Testnet wallet"
               chainFilter="ARC-TESTNET"
               excludeGatewaySigner
@@ -176,18 +212,49 @@ export function SwapPanel() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <Label htmlFor="swap-amount">Sell {tokenIn}</Label>
-            <Input
-              id="swap-amount"
-              type="number"
-              inputMode="decimal"
-              placeholder="0.00"
-              value={amountIn}
-              onChange={(e) => setAmountIn(e.target.value)}
-              min={0}
-              step={0.01}
-              disabled={!wallet || executing}
-            />
+            <div className="flex items-center justify-between">
+              <Label htmlFor="swap-amount">Sell {tokenIn}</Label>
+              {wallet && balanceLoaded && (
+                <span className="text-muted-foreground text-xs tabular-nums">
+                  Balance: {trimAmount(maxAmount, 2)} {tokenIn}
+                </span>
+              )}
+            </div>
+            <div className="relative">
+              <Input
+                id="swap-amount"
+                type="number"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={amountIn}
+                onChange={(e) => setAmountIn(e.target.value)}
+                min={0}
+                max={maxAmount > 0 ? maxAmount : undefined}
+                step={0.01}
+                disabled={!wallet || isEmpty || executing}
+                className="pr-14"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleMax}
+                disabled={!wallet || isEmpty || executing}
+                className="absolute right-1 top-1 h-7 px-2 text-xs"
+              >
+                MAX
+              </Button>
+            </div>
+            {isEmpty && (
+              <p className="text-muted-foreground text-xs">
+                This wallet has no {tokenIn} to swap.
+              </p>
+            )}
+            {overMax && (
+              <p className="text-xs text-red-500">
+                Exceeds available balance of {trimAmount(maxAmount, 2)} {tokenIn}.
+              </p>
+            )}
           </div>
 
           <div className="flex justify-center">

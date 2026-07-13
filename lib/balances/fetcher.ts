@@ -152,6 +152,22 @@ export async function fetchWalletBalance(
 }
 
 /**
+ * Parses one entry of the balance map — `/api/wallet/balance` returns display
+ * strings like `"$1,234.56 (ARC-TESTNET)"` or `"€0.00"` — back into a number.
+ * Returns 0 for a missing or unparseable entry, so callers must check for
+ * `undefined` themselves if "not loaded yet" needs to differ from "empty".
+ *
+ * Note the value is only as precise as the API made it: the route rounds to
+ * two decimals, so this is a display-grade figure, not an exact on-chain one.
+ */
+export function parseBalanceAmount(balance: string | undefined): number {
+  if (typeof balance !== "string") return 0
+  const numericPart = balance.split(" ")[0].replace(/[$€,]/g, "")
+  const num = parseFloat(numericPart)
+  return Number.isFinite(num) ? num : 0
+}
+
+/**
  * Computes a deduplicated USDC total across wallets given the raw balance
  * map. We collapse to one entry per (address, chain) so the same wallet
  * isn't counted multiple times when several wallet IDs share an address.
@@ -164,8 +180,7 @@ export function computeWalletTotal(
   wallets.forEach((wallet) => {
     const balance = balances[wallet.circle_wallet_id]
     if (typeof balance !== "string") return
-    const numericPart = balance.split(" ")[0].replace(/[$€,]/g, "")
-    const num = parseFloat(numericPart)
+    const num = parseBalanceAmount(balance)
     if (Number.isNaN(num)) return
     const key = `${wallet.address.toLowerCase()}-${wallet.blockchain}`
     const existing = walletKey.get(key) || 0
