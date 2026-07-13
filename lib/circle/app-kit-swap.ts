@@ -30,6 +30,10 @@ import {
 } from "@circle-fin/adapter-circle-wallets"
 import type { Currency } from "@/lib/constants/currency"
 import { SWAP_SLIPPAGE_BPS } from "@/lib/constants/swap"
+import {
+  toSwapTransactionStatus,
+  type SwapTransactionStatus,
+} from "@/lib/swap/status"
 
 export const SWAP_BLOCKCHAIN = "ARC-TESTNET" as const
 
@@ -155,6 +159,8 @@ export type SwapExecuteInput = SwapQuoteInput
 export type SwapExecuteResult = {
   amountOut?: string
   txHash?: string
+  status: SwapTransactionStatus
+  statusMessage?: string
 }
 
 export async function executeSwap({
@@ -174,6 +180,8 @@ export async function executeSwap({
   return {
     amountOut: result.amountOut,
     txHash: result.txHash,
+    status: toSwapTransactionStatus(result.progress.status),
+    statusMessage: result.progress.substatusMessage,
   }
 }
 

@@ -158,9 +158,18 @@ export function SwapPanel() {
       if (!res.ok) {
         throw new Error(data.userMessage || data.error || "Swap failed")
       }
-      toast.success("Swap confirmed", {
-        description: `Swapped ${amountIn} ${tokenIn} for ${tokenOut} on Arc Testnet`,
-      })
+      // Only claim confirmation when the swap actually settled. A swap can
+      // come back submitted-but-not-settled, and a FAILED one is a non-2xx
+      // above, so it never reaches here.
+      if (data.status === "PENDING") {
+        toast.success("Swap submitted", {
+          description: `Swapping ${amountIn} ${tokenIn} for ${tokenOut}. It will confirm shortly.`,
+        })
+      } else {
+        toast.success("Swap confirmed", {
+          description: `Swapped ${amountIn} ${tokenIn} for ${tokenOut} on Arc Testnet`,
+        })
+      }
       resetForm()
       setRefreshKey((k) => k + 1)
       await refreshWalletBalance()

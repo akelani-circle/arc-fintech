@@ -57,6 +57,11 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       amountIn,
     })
 
+    // Log the swap under its *actual* lifecycle status. A FAILED swap is still
+    // recorded — it happened on-chain and the user should see it — but it is
+    // recorded as FAILED, and reported to the caller as an error rather than a
+    // success. PENDING rows are reconciled later by the Circle webhook, which
+    // matches SWAP rows by tx_hash (see app/api/circle/webhook/route.ts).
     const { error: insertError } = await supabase.from("transactions").insert([
       {
         user_id: user.id,
@@ -67,11 +72,24 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         blockchain: SWAP_BLOCKCHAIN,
         type: "SWAP",
         currency: tokenIn,
-        status: result.txHash ? "CONFIRMED" : "PENDING",
+        status: result.status,
       },
     ])
     if (insertError) {
       console.error("Failed to log swap transaction to Supabase:", insertError)
+    }
+
+    if (result.status === "FAILED") {
+      return NextResponse.json(
+        {
+          error: "Swap failed",
+          userMessage:
+            result.statusMessage ||
+            "The swap was submitted but failed on-chain. No tokens were exchanged.",
+          txHash: result.txHash,
+        },
+        { status: 502 }
+      )
     }
 
     return NextResponse.json({ success: true, ...result })
