@@ -13,6 +13,7 @@
 import * as React from "react"
 import {
   IconArrowsLeftRight,
+  IconArrowsUpDown,
   IconLoader,
   IconMinus,
   IconPlus,
@@ -24,6 +25,7 @@ import {
   shortenAddress,
   getExplorerUrl,
 } from "@/lib/utils/data-formatters"
+import { otherCurrency } from "@/lib/constants/currency"
 import type {
   FullTransaction,
   FullWallet,
@@ -31,7 +33,7 @@ import type {
 
 type ActivityItem = {
   id: string
-  type: "wallet_created" | "transfer" | "deposit" | "withdrawal"
+  type: "wallet_created" | "transfer" | "deposit" | "withdrawal" | "swap"
   title: React.ReactNode
   description: React.ReactNode
   timestamp: string
@@ -88,6 +90,30 @@ export function ActivityFeed({
     }))
 
     const txItems: ActivityItem[] = transactions.map((tx) => {
+      if (tx.type === "SWAP") {
+        return {
+          id: `tx-${tx.id}`,
+          type: "swap",
+          title: (
+            <span>
+              {(tx.amount ?? 0).toLocaleString("en-US", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{" "}
+              {tx.currency}
+            </span>
+          ),
+          timestamp: tx.created_at,
+          icon: IconArrowsUpDown,
+          description: (
+            <span>
+              {tx.currency} → {otherCurrency(tx.currency)} on{" "}
+              {shortenAddress(tx.sender_address)}
+            </span>
+          ),
+        }
+      }
+
       // Vault deposits/withdrawals (EarnKit). Labelled explicitly so they don't
       // fall through to the generic wallet-to-wallet "transfer" rendering below.
       // Deposit: wallet -> vault (vault is recipient); withdraw: vault -> wallet.
@@ -192,10 +218,12 @@ export function ActivityFeed({
         type: "transfer",
         title: (
           <span>
-            ${(tx.amount ?? 0).toLocaleString("en-US", {
+            {tx.currency === "EURC" ? "" : "$"}
+            {(tx.amount ?? 0).toLocaleString("en-US", {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
+            {tx.currency === "EURC" ? " EURC" : ""}
           </span>
         ),
         timestamp: tx.created_at,

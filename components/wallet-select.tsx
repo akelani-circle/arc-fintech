@@ -29,6 +29,8 @@ import {
 } from "@/components/ui/select"
 import { toast } from "sonner"
 import { useBalanceContext } from "@/lib/contexts/balance-context"
+import { fetchWalletBalance } from "@/lib/balances/fetcher"
+import type { Currency } from "@/lib/constants/currency"
 
 // Stable reference for the "no balance context" fallback so it doesn't
 // re-trigger the displayedWallets useMemo on every render.
@@ -67,6 +69,15 @@ interface WalletSelectProps {
   excludeGatewaySigner?: boolean
   excludeArcWallets?: boolean
   minBalance?: number
+  /**
+   * Currency to display balances for. Defaults to "USDC", which reads from
+   * the shared balance context (unchanged, no extra fetch). "EURC" bypasses
+   * the context and fetches directly, since the context only ever tracks
+   * USDC (the dashboard's summary balance).
+   */
+  token?: Currency
+  /** Bump this (e.g. after a swap/transfer completes) to force an EURC balance refetch. */
+  refreshKey?: number | string
 }
 
 export function WalletSelect({
@@ -82,20 +93,42 @@ export function WalletSelect({
   excludeGatewaySigner = false,
   excludeArcWallets = false,
   minBalance,
+  token = "USDC",
+  refreshKey,
 }: WalletSelectProps) {
   const [wallets, setWallets] = React.useState<WalletOption[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
   const supabase = createClient()
-  
+
   // Try to access balance context, handle if it's not available
-  let walletBalances: Record<string, string> = EMPTY_WALLET_BALANCES
+  let contextWalletBalances: Record<string, string> = EMPTY_WALLET_BALANCES
   try {
-     
+
     const context = useBalanceContext()
-    walletBalances = context.walletBalances
+    contextWalletBalances = context.walletBalances
   } catch {
     // Ignore error if context is missing
   }
+
+  // "USDC" reads from the shared context (no extra fetch). "EURC" fetches
+  // directly for just the wallets this dropdown ends up showing.
+  const [eurcBalances, setEurcBalances] = React.useState<Record<string, string>>({})
+  React.useEffect(() => {
+    if (token !== "EURC" || wallets.length === 0) return
+    let cancelled = false
+    fetchWalletBalance(wallets, "EURC")
+      .then((balances) => {
+        if (!cancelled) setEurcBalances(balances)
+      })
+      .catch((error) => {
+        console.error("Error fetching EURC balances:", error)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, wallets, refreshKey])
+
+  const walletBalances = token === "EURC" ? eurcBalances : contextWalletBalances
 
   React.useEffect(() => {
     const fetchWallets = async () => {
@@ -157,7 +190,7 @@ export function WalletSelect({
       result = result.filter((w) => {
         const balanceStr = walletBalances[w.circle_wallet_id]
         if (!balanceStr) return false
-        const numericPart = balanceStr.split(" ")[0].replace(/[$,]/g, "")
+        const numericPart = balanceStr.split(" ")[0].replace(/[$€,]/g, "")
         const balance = parseFloat(numericPart)
         return !isNaN(balance) && balance > minBalance
       })

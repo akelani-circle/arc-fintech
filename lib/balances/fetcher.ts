@@ -129,9 +129,14 @@ export async function fetchGatewayBalance(
  * Calls `/api/wallet/balance` for a set of wallets and returns the raw
  * `{ [walletId]: balanceString }` map. Caller is responsible for merging with
  * any prior balances and computing per-address totals.
+ *
+ * `token` defaults to "USDC" (the balance context's own usage). Pass "EURC"
+ * to fetch the EURC-denominated balance instead — used by dialogs that offer
+ * a currency toggle (see `components/currency-toggle.tsx`).
  */
 export async function fetchWalletBalance(
-  wallets: Wallet[]
+  wallets: Wallet[],
+  token: "USDC" | "EURC" = "USDC"
 ): Promise<Record<string, string>> {
   if (!wallets || wallets.length === 0) return {}
 
@@ -139,11 +144,27 @@ export async function fetchWalletBalance(
   const res = await fetch("/api/wallet/balance", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ walletIds }),
+    body: JSON.stringify({ walletIds, token }),
   })
   if (!res.ok) throw new Error("Failed to fetch wallet balance")
 
   return (await res.json()) as Record<string, string>
+}
+
+/**
+ * Parses one entry of the balance map — `/api/wallet/balance` returns display
+ * strings like `"$1,234.56 (ARC-TESTNET)"` or `"€0.00"` — back into a number.
+ * Returns 0 for a missing or unparseable entry, so callers must check for
+ * `undefined` themselves if "not loaded yet" needs to differ from "empty".
+ *
+ * Note the value is only as precise as the API made it: the route rounds to
+ * two decimals, so this is a display-grade figure, not an exact on-chain one.
+ */
+export function parseBalanceAmount(balance: string | undefined): number {
+  if (typeof balance !== "string") return 0
+  const numericPart = balance.split(" ")[0].replace(/[$€,]/g, "")
+  const num = parseFloat(numericPart)
+  return Number.isFinite(num) ? num : 0
 }
 
 /**
@@ -159,8 +180,7 @@ export function computeWalletTotal(
   wallets.forEach((wallet) => {
     const balance = balances[wallet.circle_wallet_id]
     if (typeof balance !== "string") return
-    const numericPart = balance.split(" ")[0].replace(/[$,]/g, "")
-    const num = parseFloat(numericPart)
+    const num = parseBalanceAmount(balance)
     if (Number.isNaN(num)) return
     const key = `${wallet.address.toLowerCase()}-${wallet.blockchain}`
     const existing = walletKey.get(key) || 0

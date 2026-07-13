@@ -205,14 +205,16 @@ async function applyTransactionStateChange(
 
   if (txHash) {
     // Fallback: match by tx_hash. We use this for rows that were inserted
-    // without a Circle DCW transaction id — REBALANCE rows (Bridge Kit) and
-    // Gateway deposits routed through App Kit, both of which return only the
-    // on-chain hash, not the underlying DCW transaction id.
+    // without a Circle DCW transaction id — REBALANCE rows (Bridge Kit),
+    // Gateway deposits routed through App Kit, and SWAP rows (App Kit Swap),
+    // all of which return only the on-chain hash, not the underlying DCW
+    // transaction id. Without SWAP here, a swap left PENDING at execution time
+    // could never be reconciled to CONFIRMED/FAILED by any code path.
     const { data: rebalRows, error: rebalErr } = await supabaseAdmin
       .from("transactions")
       .update(updatePayload)
       .eq("tx_hash", txHash)
-      .in("type", ["REBALANCE", "OUTBOUND"])
+      .in("type", ["REBALANCE", "OUTBOUND", "SWAP"])
       .select("id");
 
     if (rebalErr) {

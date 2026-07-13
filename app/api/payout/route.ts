@@ -25,6 +25,7 @@ import {
   executeGatewayMint,
   type SupportedChain,
   getUsdcBalance,
+  getTokenBalance,
   fetchGatewayBalance,
   GATEWAY_WALLET_ADDRESS,
   PollingTimeoutError,
@@ -50,6 +51,7 @@ import {
   BLOCKCHAIN_BY_SDK_CHAIN as CHAIN_TO_BLOCKCHAIN,
   CHAIN_LABEL_BY_SDK_CHAIN as CHAIN_LABELS,
 } from "@/lib/constants/chains";
+import { CURRENCIES, type Currency } from "@/lib/constants/currency";
 import type { Address } from "viem";
 
 function convertToSmallestUnit(amount: string): string {
@@ -77,17 +79,47 @@ interface WalletBalance {
 export const POST = withAuth(async (req, { user, supabase }) => {
   try {
     const body = await req.json();
-    const { 
-      recipientAddress, 
-      amount, 
+    const {
+      recipientAddress,
+      amount,
       destinationChain: requestedChain,
       sourceType = "auto",
-      sourceWalletId 
+      sourceWalletId
     } = body;
 
     if (!recipientAddress || !amount) {
       return NextResponse.json(
         { error: "Missing required fields" },
+        { status: 400 }
+      );
+    }
+
+    // A non-USDC payout is only satisfiable on a true same-chain wallet source
+    // (the `else` branch below, which calls sendUsdcOnSameChainWithAppKit
+    // directly). "auto" picks its wallet by USDC balance, and every
+    // cross-chain/"gateway" path settles through Gateway's burn/mint, which is
+    // USDC-only.
+    //
+    // Reject rather than silently downgrade: this endpoint moves money, so a
+    // request asking for EURC must never quietly send USDC instead.
+    const rawCurrency = body.currency ?? "USDC";
+    if (!(CURRENCIES as readonly string[]).includes(rawCurrency)) {
+      return NextResponse.json(
+        {
+          error: "Unsupported currency",
+          userMessage: `Currency must be one of: ${CURRENCIES.join(", ")}.`,
+        },
+        { status: 400 }
+      );
+    }
+    const requestedCurrency = rawCurrency as Currency;
+
+    if (requestedCurrency !== "USDC" && sourceType !== "wallet") {
+      return NextResponse.json(
+        {
+          error: "Unsupported currency for this source",
+          userMessage: `${requestedCurrency} payouts require an explicit same-chain wallet source. Gateway and automatic routing settle in USDC only.`,
+        },
         { status: 400 }
       );
     }
@@ -152,11 +184,38 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         );
       }
 
-      if (selectedWallet.balance < amountInAtomicUnits) {
+      const isSameChain = selectedWallet.chain === destinationChain;
+
+      // A cross-chain wallet source routes through Gateway, which is USDC-only.
+      if (requestedCurrency !== "USDC" && !isSameChain) {
         return NextResponse.json(
-          { 
+          {
+            error: "Unsupported currency for this route",
+            userMessage: `${requestedCurrency} can only be sent same-chain. The selected wallet is on ${CHAIN_LABELS[selectedWallet.chain]}, but the destination is ${CHAIN_LABELS[destinationChain]}, which settles via Gateway in USDC.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      // Validate against the balance of the token we will actually send. The
+      // `walletBalances` map above is USDC-only (it drives Gateway routing), so
+      // a non-USDC payout needs its own read — otherwise a wallet holding EURC
+      // but no USDC would be rejected, and one holding USDC but no EURC would
+      // pass here only to fail inside App Kit.
+      const availableBalance =
+        requestedCurrency === "USDC"
+          ? selectedWallet.balance
+          : await getTokenBalance(
+              selectedWallet.address as Address,
+              selectedWallet.chain,
+              requestedCurrency
+            );
+
+      if (availableBalance < amountInAtomicUnits) {
+        return NextResponse.json(
+          {
             error: "Insufficient balance",
-            userMessage: `Selected wallet has insufficient USDC balance. Available: ${Number(selectedWallet.balance) / 1_000_000} USDC, Required: ${amountNum} USDC.`
+            userMessage: `Selected wallet has insufficient ${requestedCurrency} balance. Available: ${Number(availableBalance) / 1_000_000} ${requestedCurrency}, Required: ${amountNum} ${requestedCurrency}.`
           },
           { status: 400 }
         );
@@ -165,7 +224,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       sourceWallet = selectedWallet;
 
       // Check if it's same-chain or cross-chain
-      if (selectedWallet.chain === destinationChain) {
+      if (isSameChain) {
         strategy = "same-chain";
         estimatedFee = 0.50;
         estimatedTime = 30;
@@ -553,6 +612,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
     // Execute transfer
     let txId: string;
     let txHash: string | undefined;
+    let transactionCurrency: Currency = "USDC";
 
     if (useGateway) {
       // Use Gateway with EOA signing (no Circle wallet needed for burn, only for mint)
@@ -721,12 +781,19 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       txHash = mintTx.txHash as string;
       console.log(`Gateway transfer completed. Mint TX: ${txHash}`);
     } else {
+      // Reaching here with a non-USDC currency is already guaranteed to be an
+      // explicit same-chain wallet payout — the guards above 400 on every other
+      // combination — so the requested currency is honored as-is. "auto" that
+      // resolves to a same-chain wallet still lands here, but it can only ever
+      // have asked for USDC.
+      transactionCurrency = sourceType === "wallet" ? requestedCurrency : "USDC";
       try {
         const sameChainSendResult = await sendUsdcOnSameChainWithAppKit({
           sourceBlockchain: sourceWallet.blockchain,
           sourceWalletAddress: sourceWallet.address,
           recipientAddress,
           amount: amountNum.toString(),
+          token: transactionCurrency,
         });
 
         txId = sameChainSendResult.txId;
@@ -762,6 +829,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         circle_transaction_id: txId,
         blockchain: CHAIN_TO_BLOCKCHAIN[destinationChain],
         type: "OUTBOUND",
+        currency: transactionCurrency,
         status: "PENDING",
       },
     ]);

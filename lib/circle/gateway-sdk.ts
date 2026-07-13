@@ -36,6 +36,9 @@ import {
   TransactionType,
   type AbiParametersInner,
 } from "@circle-fin/developer-controlled-wallets";
+import { BLOCKCHAIN_BY_SDK_CHAIN } from "@/lib/constants/chains";
+import { CHAIN_TO_EURC_ADDRESS } from "@/lib/constants/eurc-addresses";
+import type { Currency } from "@/lib/constants/currency";
 
 export const GATEWAY_WALLET_ADDRESS = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
 export const GATEWAY_MINTER_ADDRESS = "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B";
@@ -856,10 +859,36 @@ export async function getUsdcBalance(
   address: Address,
   chain: SupportedChain
 ): Promise<bigint> {
-  // Check cache first
-  const cacheKey = `${address.toLowerCase()}-${chain}`;
+  return getTokenBalance(address, chain, "USDC");
+}
+
+/**
+ * On-chain ERC-20 balance for a given stablecoin. USDC and EURC are both
+ * 6-decimal on every chain this app supports, so the returned atomic amount is
+ * directly comparable to `convertToSmallestUnit()` output for either currency.
+ *
+ * Throws when the currency has no contract on the chain, rather than silently
+ * reading the wrong token.
+ */
+export async function getTokenBalance(
+  address: Address,
+  chain: SupportedChain,
+  currency: Currency = "USDC"
+): Promise<bigint> {
+  const tokenAddress =
+    currency === "EURC"
+      ? CHAIN_TO_EURC_ADDRESS[BLOCKCHAIN_BY_SDK_CHAIN[chain]]
+      : USDC_ADDRESSES[chain];
+
+  if (!tokenAddress) {
+    throw new Error(`${currency} is not configured for chain: ${chain}`);
+  }
+
+  // Cache is keyed by currency too — otherwise an EURC read would be served a
+  // cached USDC balance for the same (address, chain).
+  const cacheKey = `${address.toLowerCase()}-${chain}-${currency}`;
   const cached = balanceCache.get(cacheKey);
-  
+
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return cached.balance;
   }
@@ -872,7 +901,7 @@ export async function getUsdcBalance(
     });
 
     const result = await publicClient.readContract({
-      address: USDC_ADDRESSES[chain] as Address,
+      address: tokenAddress as Address,
       abi: erc20Abi,
       functionName: "balanceOf",
       args: [address],

@@ -31,6 +31,7 @@ import {
   IconArrowsSort,
   IconRefresh,
   IconMinus,
+  IconArrowsUpDown,
 } from "@tabler/icons-react"
 import { format } from "date-fns"
 import { Button } from "@/components/ui/button"
@@ -47,7 +48,12 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { isGatewayDepositRecipient } from "@/lib/constants/chains"
-import { shortenAddress, getExplorerUrl } from "@/lib/utils/data-formatters"
+import {
+  shortenAddress,
+  getExplorerUrl,
+  formatMoney,
+} from "@/lib/utils/data-formatters"
+import { otherCurrency, type Currency } from "@/lib/constants/currency"
 import { useBalanceContext } from "@/lib/contexts/balance-context"
 import { VaultLink } from "@/components/earn/vault-link"
 
@@ -61,8 +67,12 @@ type ActivityItem = {
     | "deposit"
     | "withdrawal"
     | "rebalance"
+    | "swap"
   title: string
   amount?: number
+  /** Currency the `amount` is denominated in. Absent for wallet_created rows,
+   * which carry no amount. */
+  currency?: Currency
   blockchain?: string
   address?: string
   secondaryAddress?: string
@@ -131,6 +141,12 @@ function ActivityContent() {
       if (tx.type === "REBALANCE") {
         type = "rebalance"
         title = "Rebalance"
+      } else if (tx.type === "SWAP") {
+        // A swap is a single-wallet currency conversion, so the title names the
+        // direction rather than a counterparty; `amount`/`currency` are the
+        // sell side, matching the swap history panel.
+        type = "swap"
+        title = `${tx.currency} → ${otherCurrency(tx.currency)}`
       } else if (tx.type === "EARN_DEPOSIT") {
         type = "deposit"
         title = "Vault"
@@ -153,6 +169,7 @@ function ActivityContent() {
         type,
         title,
         amount: tx.amount,
+        currency: tx.currency,
         blockchain: senderWallet?.blockchain || tx.blockchain,
         address: tx.sender_address,
         secondaryAddress: tx.recipient_address,
@@ -232,6 +249,8 @@ function ActivityContent() {
         return <Badge variant="secondary">Transfer</Badge>
       case "rebalance":
         return <Badge variant="outline" className="border-blue-200 text-blue-700 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800"><IconRefresh className="mr-1 size-3" /> Rebalance</Badge>
+      case "swap":
+        return <Badge variant="outline" className="border-violet-200 text-violet-700 bg-violet-50 dark:bg-violet-900/30 dark:text-violet-400 dark:border-violet-800"><IconArrowsUpDown className="mr-1 size-3" /> Swap</Badge>
       case "wallet_created":
         return <Badge variant="outline"><IconWallet className="mr-1 size-3" /> Created</Badge>
     }
@@ -382,7 +401,7 @@ function ActivityContent() {
                   <TableCell className="text-right font-medium">
                     {item.amount !== undefined ? (
                       <span className={item.type === "deposit" ? "text-green-600 dark:text-green-400" : ""}>
-                        {item.type === "deposit" ? "+" : ""}${item.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        {item.type === "deposit" ? "+" : ""}{formatMoney(item.amount, item.currency)}
                       </span>
                     ) : (
                       <span className="text-muted-foreground">-</span>

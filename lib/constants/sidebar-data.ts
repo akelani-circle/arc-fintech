@@ -22,6 +22,7 @@ import {
   IconWallet,
   IconShieldCheck,
   IconTrendingUp,
+  IconArrowsExchange,
 } from "@tabler/icons-react"
 
 export const sidebarData = {
@@ -55,6 +56,11 @@ export const sidebarData = {
       title: "Earn",
       url: "/dashboard/earn",
       icon: IconTrendingUp,
+    },
+    {
+      title: "Swap",
+      url: "/dashboard/swap",
+      icon: IconArrowsExchange,
     },
   ],
 }

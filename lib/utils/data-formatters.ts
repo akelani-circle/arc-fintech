@@ -17,6 +17,7 @@
  */
 
 import { BLOCK_EXPLORERS } from "@/lib/constants/block-explorers"
+import type { Currency } from "@/lib/constants/currency"
 
 /**
  * Build a block explorer URL for a given chain. Falls back to Etherscan
@@ -48,6 +49,24 @@ export function formatUsdc(amount: number | string): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n)
+}
+
+/**
+ * Format an amount in whichever currency it is denominated: `$1,234.56` for
+ * USDC, `1,234.56 EURC` for EURC. Intl's `EUR` style would render `€`, but the
+ * token is EURC rather than euros, so the ticker is suffixed instead.
+ */
+export function formatMoney(
+  amount: number | string,
+  currency: Currency = "USDC"
+): string {
+  const n = typeof amount === "string" ? Number(amount) : amount
+  if (currency === "USDC") return formatUsdc(n)
+  if (!Number.isFinite(n)) return "0.00 EURC"
+  return `${n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} ${currency}`
 }
 
 // Utility to create wallet/transaction details for search results

@@ -30,9 +30,11 @@ namespace NodeJS {
     // Arc Testnet RPC (optional but recommended; falls back to public endpoint).
     ARC_TESTNET_RPC_KEY?: string
 
-    // EarnKit Kit Key (optional). When set, EarnKit runs in permissioned mode
-    // with integrator attribution + higher rate limits; otherwise permissionless.
+    // Circle Kit Key, shared by EarnKit and App Kit Swap. When set, both run in
+    // permissioned mode with integrator attribution + higher rate limits.
+    // EarnKit falls back to permissionless when unset; Swap does not — it fails
+    // outright, so the Swap page needs this key.
     // Format: KIT_KEY:<keyId>:<keySecret>
-    EARN_KIT_KEY?: string
+    KIT_KEY?: string
   }
 }
