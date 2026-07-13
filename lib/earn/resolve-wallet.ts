@@ -47,3 +47,23 @@ export async function resolveEarnWallet(
   }
   return { ok: true, address: data.address }
 }
+
+/**
+ * Resolve every Arc Testnet wallet address the authenticated user owns. Used by
+ * the vaults list's "Your position" column, which sums a user's holdings in
+ * each vault across all their Arc wallets. Addresses are deduplicated (Circle
+ * SCA wallets can share an address) so a vault position is never double-counted.
+ */
+export async function resolveEarnWalletAddresses(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("wallets")
+    .select("address")
+    .eq("user_id", userId)
+    .eq("blockchain", EARN_BLOCKCHAIN)
+
+  if (error || !data) return []
+  return [...new Set(data.map((w) => w.address as string))]
+}

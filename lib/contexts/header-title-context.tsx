@@ -25,13 +25,21 @@ import * as React from "react"
  * primitives. Split into a stable setter context and a value context so
  * components that only set content never re-render when it changes.
  */
+/** A right-aligned label/value pill rendered in the header bar. */
+export interface HeaderStat {
+  label: string
+  value: string
+}
+
 export interface HeaderContent {
   /** Title text shown in place of the static nav title. */
-  title: string
+  title?: string
   /** Optional protocol/curator tag rendered beside the title (e.g. "MORPHO"). */
   protocol?: string
   /** Optional on-chain address rendered right-aligned with an explorer link. */
   address?: string
+  /** Optional right-aligned stat pills (e.g. deposit totals). */
+  stats?: HeaderStat[]
 }
 
 const SetHeaderContentContext = React.createContext<
@@ -65,8 +73,14 @@ export function useHeaderContent(content: HeaderContent | null) {
   const title = content?.title
   const protocol = content?.protocol
   const address = content?.address
+  // Serialize the stats array so the effect depends on a stable primitive and
+  // reconstructs the value inside, keeping only strings crossing the boundary.
+  const statsKey = content?.stats ? JSON.stringify(content.stats) : undefined
   React.useEffect(() => {
-    setContent(title ? { title, protocol, address } : null)
+    const stats = statsKey ? (JSON.parse(statsKey) as HeaderStat[]) : undefined
+    const hasContent =
+      title || protocol || address || (stats && stats.length > 0)
+    setContent(hasContent ? { title, protocol, address, stats } : null)
     return () => setContent(null)
-  }, [setContent, title, protocol, address])
+  }, [setContent, title, protocol, address, statsKey])
 }

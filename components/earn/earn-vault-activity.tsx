@@ -12,30 +12,25 @@
 
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
-import { IconArrowDownLeft, IconArrowUpRight } from "@tabler/icons-react"
+import { toast } from "sonner"
+import {
+  IconArrowDownLeft,
+  IconArrowUpRight,
+  IconCopy,
+} from "@tabler/icons-react"
 
-import { createClient } from "@/lib/supabase/client"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
-import { earnKeys } from "@/lib/earn/use-earn"
-import { getExplorerUrl } from "@/lib/utils/data-formatters"
+import { Button } from "@/components/ui/button"
+import { useEarnActivity } from "@/lib/earn/use-earn"
+import { getExplorerUrl, shortenAddress } from "@/lib/utils/data-formatters"
 import { formatTokenAmount } from "@/lib/earn/format"
 import { formatDate } from "@/lib/utils/data-formatters"
 
-type EarnTx = {
-  id: string
-  amount: number
-  type: "EARN_DEPOSIT" | "EARN_WITHDRAW"
-  tx_hash: string | null
-  created_at: string
-}
-
 /**
- * The authenticated user's own deposit/withdraw history for a single vault,
- * read from Supabase (RLS scopes rows to the user). Deposits are logged with
- * the vault as the recipient and withdrawals with the vault as the sender, so
- * we match either side.
+ * The authenticated user's own deposit/withdraw history for a single vault.
+ * Backed by the shared `useEarnActivity` query so the Activity tab and the
+ * mock-rewards accrual clock read one cached result.
  */
 export function EarnVaultActivity({
   vaultAddress,
@@ -47,24 +42,16 @@ export function EarnVaultActivity({
   // react-query caches the result by vault address, so switching away from the
   // Activity tab and back (Radix unmounts inactive panels) reads the cache
   // instead of re-querying Supabase and flashing skeletons each time.
-  const { data: rows } = useQuery({
-    queryKey: earnKeys.activity(vaultAddress),
-    queryFn: async (): Promise<EarnTx[]> => {
-      const supabase = createClient()
-      const { data, error } = await supabase
-        .from("transactions")
-        .select("id, amount, type, tx_hash, created_at")
-        .in("type", ["EARN_DEPOSIT", "EARN_WITHDRAW"])
-        .or(
-          `sender_address.ilike.${vaultAddress},recipient_address.ilike.${vaultAddress}`
-        )
-        .order("created_at", { ascending: false })
-        .limit(25)
+  const { data: rows } = useEarnActivity(vaultAddress)
 
-      if (error) throw error
-      return (data ?? []) as EarnTx[]
-    },
-  })
+  const copyHash = async (hash: string) => {
+    try {
+      await navigator.clipboard.writeText(hash)
+      toast.success("Transaction hash copied")
+    } catch {
+      toast.error("Failed to copy to clipboard")
+    }
+  }
 
   if (rows === undefined) {
     return (
@@ -102,25 +89,38 @@ export function EarnVaultActivity({
                 <span className="text-sm font-medium">
                   {isDeposit ? "Deposit" : "Withdraw"}
                 </span>
-                <span className="text-muted-foreground text-xs">
-                  {formatDate(tx.created_at)}
-                </span>
+                <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                  <span>{formatDate(tx.created_at)}</span>
+                  {tx.tx_hash && (
+                    <>
+                      <span aria-hidden="true">•</span>
+                      <a
+                        href={getExplorerUrl("ARC-TESTNET", tx.tx_hash, "tx")}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:text-primary font-mono"
+                      >
+                        {shortenAddress(tx.tx_hash)}
+                      </a>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-5"
+                        onClick={() => copyHash(tx.tx_hash!)}
+                        aria-label="Copy transaction hash"
+                      >
+                        <IconCopy className="size-3" />
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium">
                 {formatTokenAmount(tx.amount, asset, 2)}
               </span>
-              {tx.tx_hash ? (
-                <a
-                  href={getExplorerUrl("ARC-TESTNET", tx.tx_hash, "tx")}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-muted-foreground hover:text-primary text-xs underline"
-                >
-                  tx
-                </a>
-              ) : (
+              {!tx.tx_hash && (
                 <Badge variant="outline" className="font-normal">
                   pending
                 </Badge>

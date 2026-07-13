@@ -96,6 +96,22 @@ export interface EarnPosition {
   hasPosition: boolean
 }
 
+/**
+ * A user's summed holdings in a single vault, aggregated across every Arc
+ * Testnet wallet they own. Feeds the vaults list's "Your position" column.
+ */
+export interface EarnVaultHolding {
+  /** Summed withdrawable balance as a decimal string (USDC ~ $1). */
+  balance: string
+  /** True when the summed balance is > 0 in at least one wallet. */
+  hasPosition: boolean
+}
+
+export interface EarnPositionsResponse {
+  /** Keyed by lowercased vault address. Absent keys mean no position. */
+  holdings: Record<string, EarnVaultHolding>
+}
+
 export interface EarnAmount {
   symbol: string
   amount: string

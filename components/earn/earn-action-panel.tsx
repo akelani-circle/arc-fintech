@@ -13,7 +13,7 @@
 "use client"
 
 import * as React from "react"
-import { IconLoader2, IconExternalLink } from "@tabler/icons-react"
+import { IconLoader2 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { useQueryClient } from "@tanstack/react-query"
 
@@ -26,8 +26,14 @@ import { useBalanceContext } from "@/lib/contexts/balance-context"
 import {
   fetchEarnQuote,
   useEarnPosition,
+  useEarnActivity,
   earnKeys,
 } from "@/lib/earn/use-earn"
+import {
+  useMockRewards,
+  REWARD_DISPLAY_DECIMALS,
+  CLAIM_MIN_ACCRUED,
+} from "@/lib/earn/mock-rewards"
 import type { EarnVault, EarnQuote } from "@/lib/earn/types"
 import { formatApy, formatTokenAmount, trimAmount } from "@/lib/earn/format"
 import { EarnPositionSummary } from "@/components/earn/earn-position-summary"
@@ -55,6 +61,28 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
 
   const walletId = wallet?.circle_wallet_id ?? null
   const position = useEarnPosition(walletId, vault.vaultAddress)
+
+  // Mocked Merkl-style reward incentives (see lib/earn/mock-rewards.ts). Reward
+  // epochs don't fire on Arc Testnet, so accrual + claiming are simulated on the
+  // client from the real balance, reward APY, and deposit history.
+  const { data: activity } = useEarnActivity(vault.vaultAddress)
+  const rewards = useMockRewards({
+    vault,
+    position: position.data,
+    walletId,
+    activity,
+  })
+
+  const handleClaim = () => {
+    const claimed = rewards.tokens
+      .filter((t) => t.accrued >= CLAIM_MIN_ACCRUED)
+      .map((t) => formatTokenAmount(t.accrued, t.token, REWARD_DISPLAY_DECIMALS))
+      .join(", ")
+    rewards.claim()
+    toast.success("Rewards claimed", {
+      description: claimed ? `${claimed} - ${vault.name}` : vault.name,
+    })
+  }
 
   const walletUsdc = parseWalletBalance(
     wallet ? walletBalances[wallet.circle_wallet_id] : undefined
@@ -110,6 +138,18 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
     setAmount("")
     setQuote(null)
     setQuoteError(null)
+  }
+
+  // Cap typed/pasted input to the wallet's available headroom for the active
+  // mode. The native `max=` attribute only drives validation + spinners, not the
+  // typed value, so the actual clamp has to happen here. Empty and mid-typing
+  // states ("", "1.") pass through untouched so the field stays editable.
+  const clampAmount = (raw: string) => {
+    if (raw === "") return ""
+    const n = Number(raw)
+    if (!Number.isFinite(n)) return amount // reject garbage, keep prior value
+    if (maxAmount > 0 && n > maxAmount) return trimAmount(maxAmount)
+    return raw
   }
 
   const handleMax = () => {
@@ -225,11 +265,12 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
                 id="earn-amount"
                 type="number"
                 min={0}
+                max={maxAmount > 0 ? maxAmount : undefined}
                 step="any"
                 inputMode="decimal"
                 placeholder="0.00"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => setAmount(clampAmount(e.target.value))}
                 disabled={!wallet || isSubmitting}
                 className="pr-14"
               />
@@ -251,11 +292,18 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
             )}
           </div>
 
-          {/* Position summary for the selected wallet */}
+          {/* Position summary for the selected wallet, with mocked accrued
+              reward rows + a Claim action grouped inside the same card when
+              there's an active position. */}
           {wallet && (
             <EarnPositionSummary
               query={position}
               asset={vault.asset}
+              rewards={
+                position.data?.hasPosition ? rewards.tokens : undefined
+              }
+              onClaimRewards={handleClaim}
+              canClaimRewards={rewards.canClaim && !isSubmitting}
             />
           )}
 
@@ -275,23 +323,24 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
             </div>
           )}
 
-          <Button onClick={handleSubmit} disabled={submitDisabled}>
-            {isSubmitting ? (
-              <>
-                <IconLoader2 className="size-4 animate-spin" />
-                Processing...
-              </>
-            ) : mode === "deposit" ? (
-              "Deposit"
-            ) : (
-              "Withdraw"
-            )}
-          </Button>
+          <div className="flex flex-col gap-2">
+            <Button onClick={handleSubmit} disabled={submitDisabled}>
+              {isSubmitting ? (
+                <>
+                  <IconLoader2 className="size-4 animate-spin" />
+                  Processing...
+                </>
+              ) : mode === "deposit" ? (
+                "Deposit"
+              ) : (
+                "Withdraw"
+              )}
+            </Button>
 
-          <p className="text-muted-foreground flex items-center gap-1 text-[11px]">
-            <IconExternalLink className="size-3" />
-            Executed on-chain via EarnKit on Arc Testnet.
-          </p>
+            <p className="text-muted-foreground text-[11px]">
+              Executed on-chain via EarnKit on Arc Testnet.
+            </p>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

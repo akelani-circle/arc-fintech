@@ -16,8 +16,10 @@ import * as React from "react"
 import {
   IconShieldCheck,
   IconAlertTriangle,
+  IconInfoCircle,
 } from "@tabler/icons-react"
 
+import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -29,7 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useEarnVault } from "@/lib/earn/use-earn"
+import { useEarnVault, useEarnPositions } from "@/lib/earn/use-earn"
 import { useHeaderContent } from "@/lib/contexts/header-title-context"
 import { formatApy, formatCompactUsd } from "@/lib/earn/format"
 import { getExplorerUrl, shortenAddress } from "@/lib/utils/data-formatters"
@@ -65,6 +67,14 @@ function VaultDetail({ vault }: { vault: EarnVault }) {
     address: vault.vaultAddress,
   })
 
+  // "Your Deposits" - the user's summed holdings in this vault across their Arc
+  // wallets. Same server-side aggregation the vaults list uses, scoped to one
+  // vault here.
+  const { data: positionsData, isLoading: positionsLoading } = useEarnPositions([
+    vault.vaultAddress,
+  ])
+  const holding = positionsData?.holdings?.[vault.vaultAddress.toLowerCase()]
+
   const hasStatusBadge =
     vault.circleGuarded || vault.warnings.some((w) => w.level === "RED")
 
@@ -90,8 +100,20 @@ function VaultDetail({ vault }: { vault: EarnVault }) {
       )}
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <Stat label="Total Deposits" value={formatCompactUsd(vault.totalDeposits)} />
+        <Stat
+          label="Your Deposits"
+          value={
+            holding?.hasPosition ? (
+              formatCompactUsd(holding.balance)
+            ) : positionsData || !positionsLoading ? (
+              formatCompactUsd("0")
+            ) : (
+              <Skeleton className="mt-1 h-8 w-20" />
+            )
+          }
+        />
         <Stat label="Liquidity" value={formatCompactUsd(vault.liquidity)} />
         <Stat
           label="Net APY"
@@ -143,7 +165,7 @@ function Stat({
   sub,
 }: {
   label: string
-  value: string
+  value: React.ReactNode
   sub?: string
 }) {
   return (
@@ -152,6 +174,26 @@ function Stat({
       <div className="mt-1 text-2xl font-semibold">{value}</div>
       {sub && <div className="text-muted-foreground mt-0.5 text-xs">{sub}</div>}
     </div>
+  )
+}
+
+/**
+ * Small caption shown under an empty state. EarnKit's Arc Testnet vaults are
+ * mocks that often omit market-level metadata (collateral, warnings) even
+ * though deposits/withdrawals work; on live vaults these fields are populated.
+ * Mirrors the "Executed on-chain via EarnKit…" note style on the action panel.
+ */
+function TestnetDataNote({ className }: { className?: string }) {
+  return (
+    <p
+      className={cn(
+        "text-muted-foreground flex items-center gap-1 text-[11px]",
+        className
+      )}
+    >
+      <IconInfoCircle className="size-3 shrink-0" />
+      Sourced live from EarnKit. Arc Testnet vaults may not report this yet.
+    </p>
   )
 }
 
@@ -216,8 +258,9 @@ function OverviewTab({ vault }: { vault: EarnVault }) {
 function AllocationTab({ vault }: { vault: EarnVault }) {
   if (vault.collateral.length === 0) {
     return (
-      <div className="rounded-xl border p-8 text-center text-sm text-muted-foreground">
+      <div className="flex flex-col items-center gap-2 rounded-xl border p-8 text-center text-sm text-muted-foreground">
         No collateral markets reported for this vault.
+        <TestnetDataNote className="justify-center" />
       </div>
     )
   }
@@ -265,9 +308,12 @@ function RiskTab({ vault }: { vault: EarnVault }) {
       <div className="rounded-xl border p-4">
         <h3 className="mb-3 text-sm font-semibold">Protocol Warnings</h3>
         {vault.warnings.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            No active warnings reported for this vault.
-          </p>
+          <div className="flex flex-col gap-2">
+            <p className="text-muted-foreground text-sm">
+              No active warnings reported for this vault.
+            </p>
+            <TestnetDataNote />
+          </div>
         ) : (
           <div className="flex flex-col">
             {vault.warnings.map((w) => (
@@ -317,8 +363,8 @@ function DetailSkeleton() {
   return (
     <div className="flex flex-col gap-6">
       <Skeleton className="h-9 w-64" />
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={i} className="h-20 w-full" />
         ))}
       </div>
