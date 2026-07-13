@@ -85,12 +85,16 @@ function withResolvedAddress(
 }
 
 /**
- * Optional Kit Key for permissioned mode, mirroring `earnConfig()` in
- * `lib/circle/earn-kit.ts`. When `SWAP_KIT_KEY` is set, requests run with
- * integrator attribution + higher rate limits; otherwise permissionless.
+ * Kit Key for permissioned mode, read from the same `KIT_KEY` env var as
+ * `earnConfig()` in `lib/circle/earn-kit.ts`.
+ *
+ * Unlike EarnKit, Swap has no permissionless fallback: the Stablecoin Service
+ * rejects an empty `kitKey` with a fatal INPUT_VALIDATION_FAILED, so leaving
+ * `KIT_KEY` unset disables the Swap page entirely. Still returns `undefined`
+ * rather than an empty string so the SDK's own error names the missing field.
  */
 function swapConfig(): { kitKey: string } | undefined {
-  const kitKey = process.env.SWAP_KIT_KEY
+  const kitKey = process.env.KIT_KEY
   return kitKey ? { kitKey } : undefined
 }
 

@@ -119,12 +119,13 @@ export function earnFromContext(address: string): EarnAdapterContext {
 }
 
 /**
- * Optional Kit Key for permissioned mode. When `EARN_KIT_KEY` is set EarnKit
- * runs with integrator attribution + higher rate limits; otherwise it operates
+ * Optional Kit Key for permissioned mode. When `KIT_KEY` is set EarnKit runs
+ * with integrator attribution + higher rate limits; otherwise it operates
  * permissionlessly. Returned as the SDK's per-operation `config` shape so every
- * call site is uniform.
+ * call site is uniform. The same key is shared with App Kit Swap (see
+ * `swapConfig()` in `lib/circle/app-kit-swap.ts`).
  */
 export function earnConfig(): { kitKey: string } | undefined {
-  const kitKey = process.env.EARN_KIT_KEY
+  const kitKey = process.env.KIT_KEY
   return kitKey ? { kitKey } : undefined
 }
