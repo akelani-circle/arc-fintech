@@ -50,7 +50,7 @@ import {
   BLOCKCHAIN_BY_SDK_CHAIN as CHAIN_TO_BLOCKCHAIN,
   CHAIN_LABEL_BY_SDK_CHAIN as CHAIN_LABELS,
 } from "@/lib/constants/chains";
-import type { Currency } from "@/lib/constants/currency";
+import { CURRENCIES, type Currency } from "@/lib/constants/currency";
 import type { Address } from "viem";
 
 function convertToSmallestUnit(amount: string): string {
@@ -93,13 +93,35 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       );
     }
 
-    // The currency toggle only applies to a true same-chain wallet-sourced
-    // payout (the `else` branch below, calling sendUsdcOnSameChainWithAppKit
-    // directly). "auto" mode picks its wallet by USDC balance, and any
-    // cross-chain/"gateway" path settles through Gateway's burn/mint, which
-    // is USDC-only — so this is silently ignored for anything but an
-    // explicit same-chain wallet source.
-    const requestedCurrency: Currency = body.currency === "EURC" ? "EURC" : "USDC";
+    // A non-USDC payout is only satisfiable on a true same-chain wallet source
+    // (the `else` branch below, which calls sendUsdcOnSameChainWithAppKit
+    // directly). "auto" picks its wallet by USDC balance, and every
+    // cross-chain/"gateway" path settles through Gateway's burn/mint, which is
+    // USDC-only.
+    //
+    // Reject rather than silently downgrade: this endpoint moves money, so a
+    // request asking for EURC must never quietly send USDC instead.
+    const rawCurrency = body.currency ?? "USDC";
+    if (!(CURRENCIES as readonly string[]).includes(rawCurrency)) {
+      return NextResponse.json(
+        {
+          error: "Unsupported currency",
+          userMessage: `Currency must be one of: ${CURRENCIES.join(", ")}.`,
+        },
+        { status: 400 }
+      );
+    }
+    const requestedCurrency = rawCurrency as Currency;
+
+    if (requestedCurrency !== "USDC" && sourceType !== "wallet") {
+      return NextResponse.json(
+        {
+          error: "Unsupported currency for this source",
+          userMessage: `${requestedCurrency} payouts require an explicit same-chain wallet source. Gateway and automatic routing settle in USDC only.`,
+        },
+        { status: 400 }
+      );
+    }
 
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum) || amountNum <= 0) {
@@ -161,9 +183,22 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         );
       }
 
+      const isSameChain = selectedWallet.chain === destinationChain;
+
+      // A cross-chain wallet source routes through Gateway, which is USDC-only.
+      if (requestedCurrency !== "USDC" && !isSameChain) {
+        return NextResponse.json(
+          {
+            error: "Unsupported currency for this route",
+            userMessage: `${requestedCurrency} can only be sent same-chain. The selected wallet is on ${CHAIN_LABELS[selectedWallet.chain]}, but the destination is ${CHAIN_LABELS[destinationChain]}, which settles via Gateway in USDC.`,
+          },
+          { status: 400 }
+        );
+      }
+
       if (selectedWallet.balance < amountInAtomicUnits) {
         return NextResponse.json(
-          { 
+          {
             error: "Insufficient balance",
             userMessage: `Selected wallet has insufficient USDC balance. Available: ${Number(selectedWallet.balance) / 1_000_000} USDC, Required: ${amountNum} USDC.`
           },
@@ -174,7 +209,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       sourceWallet = selectedWallet;
 
       // Check if it's same-chain or cross-chain
-      if (selectedWallet.chain === destinationChain) {
+      if (isSameChain) {
         strategy = "same-chain";
         estimatedFee = 0.50;
         estimatedTime = 30;
@@ -731,8 +766,11 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       txHash = mintTx.txHash as string;
       console.log(`Gateway transfer completed. Mint TX: ${txHash}`);
     } else {
-      // Only an explicit wallet-sourced same-chain payout can honor a
-      // non-USDC currency (see note above); everything else stays USDC.
+      // Reaching here with a non-USDC currency is already guaranteed to be an
+      // explicit same-chain wallet payout — the guards above 400 on every other
+      // combination — so the requested currency is honored as-is. "auto" that
+      // resolves to a same-chain wallet still lands here, but it can only ever
+      // have asked for USDC.
       transactionCurrency = sourceType === "wallet" ? requestedCurrency : "USDC";
       try {
         const sameChainSendResult = await sendUsdcOnSameChainWithAppKit({
