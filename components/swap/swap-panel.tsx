@@ -307,7 +307,7 @@ export function SwapPanel() {
       </div>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-[425px]" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>Confirm swap</DialogTitle>
             <DialogDescription>
