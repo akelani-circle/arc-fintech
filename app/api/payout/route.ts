@@ -25,6 +25,7 @@ import {
   executeGatewayMint,
   type SupportedChain,
   getUsdcBalance,
+  getTokenBalance,
   fetchGatewayBalance,
   GATEWAY_WALLET_ADDRESS,
   PollingTimeoutError,
@@ -196,11 +197,25 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         );
       }
 
-      if (selectedWallet.balance < amountInAtomicUnits) {
+      // Validate against the balance of the token we will actually send. The
+      // `walletBalances` map above is USDC-only (it drives Gateway routing), so
+      // a non-USDC payout needs its own read — otherwise a wallet holding EURC
+      // but no USDC would be rejected, and one holding USDC but no EURC would
+      // pass here only to fail inside App Kit.
+      const availableBalance =
+        requestedCurrency === "USDC"
+          ? selectedWallet.balance
+          : await getTokenBalance(
+              selectedWallet.address as Address,
+              selectedWallet.chain,
+              requestedCurrency
+            );
+
+      if (availableBalance < amountInAtomicUnits) {
         return NextResponse.json(
           {
             error: "Insufficient balance",
-            userMessage: `Selected wallet has insufficient USDC balance. Available: ${Number(selectedWallet.balance) / 1_000_000} USDC, Required: ${amountNum} USDC.`
+            userMessage: `Selected wallet has insufficient ${requestedCurrency} balance. Available: ${Number(availableBalance) / 1_000_000} ${requestedCurrency}, Required: ${amountNum} ${requestedCurrency}.`
           },
           { status: 400 }
         );
