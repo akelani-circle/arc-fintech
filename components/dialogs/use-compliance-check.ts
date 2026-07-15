@@ -43,27 +43,30 @@ export function useComplianceCheck({
   const [addressError, setAddressError] = useState<string>("")
   const [canReceiveUSDC, setCanReceiveUSDC] = useState<boolean | null>(null)
 
-  useEffect(() => {
+  // Synchronous, address-derived validation runs during render (React's
+  // "adjust state when a value changes" pattern). The `null` seed makes it
+  // also run on first mount. The async screening stays in the effect below.
+  const [prevAddress, setPrevAddress] = useState<string | null>(null)
+  if (prevAddress !== address) {
+    setPrevAddress(address)
     if (!address) {
       setComplianceData(null)
       setAddressError("")
       setCanReceiveUSDC(null)
-      return
-    }
-
-    if (address.length > 0 && !isValidAddress(address)) {
+    } else if (!isValidAddress(address)) {
       setComplianceData(null)
       setAddressError("Invalid blockchain address format")
       setCanReceiveUSDC(null)
-      return
-    }
-
-    setAddressError("")
-    if (address.length < 10) {
+    } else if (address.length < 10) {
       setComplianceData(null)
       setCanReceiveUSDC(null)
-      return
+    } else {
+      setAddressError("")
     }
+  }
+
+  useEffect(() => {
+    if (!address || !isValidAddress(address) || address.length < 10) return
 
     const timer = setTimeout(async () => {
       if (validateChainCompatibility && chain) {

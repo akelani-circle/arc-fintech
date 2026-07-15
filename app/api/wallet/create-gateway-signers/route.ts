@@ -67,10 +67,10 @@ export const POST = withAuth(async (_req, { user, supabase }) => {
         type: w.type,
       })),
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error creating Gateway signer wallets:", error);
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      { error: error instanceof Error ? error.message : "Internal server error" },
       { status: 500 }
     );
   }

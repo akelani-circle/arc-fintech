@@ -43,6 +43,8 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Separator } from "@/components/ui/separator";
 import { WalletSelect, WalletOption } from "@/components/wallet-select";
+import { CurrencyToggle } from "@/components/currency-toggle";
+import type { Currency } from "@/lib/constants/currency";
 import { useBalanceContext } from "@/lib/contexts/balance-context";
 import { useComplianceCheck } from "@/components/dialogs/use-compliance-check";
 
@@ -83,13 +85,23 @@ export function SendButton() {
   const [selectedWalletId, setSelectedWalletId] = useState<string>("");
   const [selectedWallet, setSelectedWallet] = useState<WalletOption | null>(null);
   const [walletSelectValue, setWalletSelectValue] = useState("");
+  const [currency, setCurrency] = useState<Currency>("USDC");
+
+  // The currency toggle only makes sense for a true same-chain wallet-sourced
+  // payout — everything else (auto, gateway, or a wallet on a different chain
+  // than the destination) settles through Gateway's burn/mint, which is
+  // USDC-only.
+  const isSameChainWalletPayout =
+    sourceType === "wallet" &&
+    !!selectedWallet &&
+    selectedWallet.blockchain === BLOCKCHAIN_MAP[destinationChain];
   
   const [showComplianceDetails, setShowComplianceDetails] = useState(false);
   const [showReviewWarning, setShowReviewWarning] = useState(false);
   const [isInternalWallet, setIsInternalWallet] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [settlementInfo, setSettlementInfo] = useState<SettlementInfo | null>(null);
-  const [routingInfo, setRoutingInfo] = useState<RoutingInfo | null>(null);
+  const [, setSettlementInfo] = useState<SettlementInfo | null>(null);
+  const [, setRoutingInfo] = useState<RoutingInfo | null>(null);
 
   const supabase = createClient();
   const { gatewayTotal, refreshGatewayBalance, refreshWalletBalance } = useBalanceContext();
@@ -111,9 +123,24 @@ export function SendButton() {
   });
 
   // Internal wallet check is unique to send (we want to redirect users to
-  // Transfer if the destination is one of their own wallets).
-  useEffect(() => {
+  // Transfer if the destination is one of their own wallets). Reset the flag
+  // during render the moment the address changes, before the debounced lookup
+  // below re-confirms it.
+  const [prevInternalAddr, setPrevInternalAddr] = useState(address);
+  if (prevInternalAddr !== address) {
+    setPrevInternalAddr(address);
     setIsInternalWallet(false);
+  }
+
+  // Force back to USDC the moment the source stops being a true same-chain
+  // wallet payout, so a stale EURC selection can't leak into a Gateway send.
+  const [prevSameChain, setPrevSameChain] = useState(isSameChainWalletPayout);
+  if (prevSameChain !== isSameChainWalletPayout) {
+    setPrevSameChain(isSameChainWalletPayout);
+    if (!isSameChainWalletPayout) setCurrency("USDC");
+  }
+
+  useEffect(() => {
     if (!address || address.length < 10) return;
 
     let cancelled = false;
@@ -176,7 +203,7 @@ export function SendButton() {
     setIsSending(true);
 
     try {
-      const requestBody: any = {
+      const requestBody: Record<string, string> = {
         recipientAddress: address,
         amount,
         destinationChain,
@@ -186,6 +213,10 @@ export function SendButton() {
       // Add wallet ID if specific wallet is selected
       if (sourceType === "wallet" && selectedWalletId) {
         requestBody.sourceWalletId = selectedWalletId;
+      }
+
+      if (isSameChainWalletPayout) {
+        requestBody.currency = currency;
       }
 
       const response = await fetch("/api/payout", {
@@ -251,6 +282,7 @@ export function SendButton() {
   const resetForm = () => {
     setAddress("");
     setAmount("1");
+    setCurrency("USDC");
     setShowReviewWarning(false);
     setIsInternalWallet(false);
     setShowComplianceDetails(false);
@@ -279,7 +311,7 @@ export function SendButton() {
             <IconChevronDown />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-80">
+        <PopoverContent className="min-w-100 w-auto">
           <div className="grid gap-4">
             <div className="space-y-2">
               <h4 className="leading-none font-medium">Send USDC to external wallet</h4>
@@ -411,14 +443,23 @@ export function SendButton() {
                     excludeGatewaySigner
                     minBalance={0}
                     chainFilter={BLOCKCHAIN_MAP[destinationChain]}
+                    token={currency}
+                    prefetchEurc
                   />
                   {selectedWalletId && selectedWallet && (
                     <p className="text-xs text-muted-foreground">
                       {selectedWallet.blockchain === BLOCKCHAIN_MAP[destinationChain]
-                        ? "✓ Same-chain transfer (lower fees)" 
+                        ? "✓ Same-chain transfer (lower fees)"
                         : "Cross-chain transfer via Gateway"}
                     </p>
                   )}
+                </div>
+              )}
+
+              {isSameChainWalletPayout && (
+                <div className="flex flex-col gap-2">
+                  <Label>Currency</Label>
+                  <CurrencyToggle value={currency} onChange={setCurrency} />
                 </div>
               )}
 

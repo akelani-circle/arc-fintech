@@ -21,29 +21,16 @@
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import {
   IconCopy,
-  IconArrowLeftRight,
   IconArrowUpRight,
-  IconArrowDownRight,
-  IconCalendar,
   IconWallet,
   IconExternalLink,
   IconRefresh,
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
-import { getExplorerUrl } from "@/lib/utils/data-formatters"
-import { formatWalletDetails, shortenAddress, formatDate, formatAmount } from "@/lib/utils/data-formatters"
+import { getExplorerUrl, formatDate } from "@/lib/utils/data-formatters"
 
 // Type definitions
 interface WalletDetails {
@@ -64,7 +51,7 @@ export function WalletDetailsCard({ wallet }: { wallet: WalletDetails }) {
     try {
       await navigator.clipboard.writeText(text)
       toast.success(`${label} copied to clipboard`)
-    } catch (error) {
+    } catch {
       toast.error("Failed to copy to clipboard")
     }
   }

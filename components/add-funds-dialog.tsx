@@ -21,7 +21,7 @@
 import { useState } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { IconLoader, IconPlus } from "@tabler/icons-react"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { toast } from "sonner"
 import * as z from "zod"
 
@@ -74,8 +74,8 @@ export function AddFundsDialog() {
   })
 
   // Watch fields to disable button if empty
-  const walletAddress = form.watch("walletAddress")
-  const amount = form.watch("amount")
+  const walletAddress = useWatch({ control: form.control, name: "walletAddress" })
+  const amount = useWatch({ control: form.control, name: "amount" })
 
   const { isSubmitting } = form.formState
 

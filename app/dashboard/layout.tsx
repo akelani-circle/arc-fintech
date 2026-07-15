@@ -19,6 +19,7 @@
 import { AppSidebar } from "@/components/app-sidebar"
 import { BalanceProviderWrapper } from "@/components/balance-provider-wrapper"
 import { QueryProvider } from "@/components/query-provider"
+import { HeaderTitleProvider } from "@/lib/contexts/header-title-context"
 import { SiteHeader } from "@/components/site-header"
 import {
   SidebarInset,
@@ -44,13 +45,15 @@ export default function DashboardLayout({
       <SidebarInset>
         <QueryProvider>
           <BalanceProviderWrapper>
-            <SiteHeader />
-            <div className="flex flex-1 flex-col">
-              <div className="@container/main flex flex-1 flex-col gap-2">
-                {children}
-                <Toaster />
+            <HeaderTitleProvider>
+              <SiteHeader />
+              <div className="flex flex-1 flex-col">
+                <div className="@container/main flex flex-1 flex-col gap-2">
+                  {children}
+                  <Toaster />
+                </div>
               </div>
-            </div>
+            </HeaderTitleProvider>
           </BalanceProviderWrapper>
         </QueryProvider>
       </SidebarInset>

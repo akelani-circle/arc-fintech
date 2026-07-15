@@ -46,7 +46,6 @@ import { ChartLineInteractive } from "@/components/chart-line-interactive"
 import { type ChartConfig } from "@/components/ui/chart"
 import { GatewayBalanceDialog } from "@/components/gateway-balance-dialog"
 import { DataFreshnessIndicator } from "@/components/data-freshness-indicator"
-import { GlobalSearch } from "@/components/global-search"
 import { useDateRange } from "@/hooks/use-date-range"
 import { ExportButton } from "@/components/export-button"
 import { useBalanceContext } from "@/lib/contexts/balance-context"
@@ -76,9 +75,12 @@ export default function Page() {
   const {
     walletBalances,
     walletTotal,
+    eurcWalletBalances,
+    eurcWalletTotal,
     gatewayTotal,
     gatewayPending,
     isLoadingWallet,
+    isLoadingEurcWallet,
     isLoadingGateway,
     isLoadingData,
     fullWallets,
@@ -152,32 +154,62 @@ export default function Page() {
       {/* Header */}
       <div className="flex flex-col mb-4">
         <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="scroll-m-20 text-3xl tracking-tight flex items-center">
-              <span className="mr-2">Balance</span>
-              {!isLoadingWallet ? (
-                `$${walletTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-              ) : (
-                <Skeleton className="h-6 w-20" />
-              )}
-            </h3>
-            <div className="text-muted-foreground flex items-center gap-2 text-lg">
-              <span>Gateway Balance</span>
-              {!isLoadingGateway ? (
-                <>
+          <div className="flex items-stretch gap-4">
+            <div className="flex flex-col gap-1">
+              <span className="font-bold">USDC Balance</span>
+              <h3 className="scroll-m-20 text-3xl tracking-tight">
+                {!isLoadingWallet ? (
+                  `$${walletTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                ) : (
+                  <Skeleton className="h-6 w-20" />
+                )}
+              </h3>
+            </div>
+
+            <Separator
+              orientation="vertical"
+              className="data-[orientation=vertical]:h-auto"
+            />
+
+            <div className="flex flex-col gap-1">
+              <span className="font-bold">EURC Balance</span>
+              <h3 className="scroll-m-20 text-3xl tracking-tight">
+                {!isLoadingEurcWallet ? (
                   <span>
-                    ${gatewayTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    €{eurcWalletTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
-                  {gatewayPending > 0 ? (
-                    <span className="text-amber-600 dark:text-amber-400 text-sm">
-                      (+${gatewayPending.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} pending)
+                ) : (
+                  <Skeleton className="h-6 w-20" />
+                )}
+              </h3>
+            </div>
+
+            <Separator
+              orientation="vertical"
+              className="data-[orientation=vertical]:h-auto"
+            />
+
+            <div className="flex flex-col gap-1">
+              <span className="font-bold flex items-center gap-1">
+                Gateway Balance
+                <GatewayBalanceDialog />
+              </span>
+              <div className="text-muted-foreground flex items-center gap-2 text-3xl tracking-tight">
+                {!isLoadingGateway ? (
+                  <>
+                    <span>
+                      ${gatewayTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
-                  ) : null}
-                  <GatewayBalanceDialog />
-                </>
-              ) : (
-                <Skeleton className="h-4 w-11" />
-              )}
+                    {gatewayPending > 0 ? (
+                      <span className="text-amber-600 dark:text-amber-400 text-sm">
+                        (+${gatewayPending.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} pending)
+                      </span>
+                    ) : null}
+                  </>
+                ) : (
+                  <Skeleton className="h-6 w-20" />
+                )}
+              </div>
             </div>
           </div>
           <DataFreshnessIndicator
@@ -319,6 +351,18 @@ export default function Page() {
               <>
                 {localWallets.slice(0, 5).map((wallet) => {
                   const balance = walletBalances[wallet.circle_wallet_id]
+                  const eurcBalance = eurcWalletBalances[wallet.circle_wallet_id]
+                  // Balance strings arrive as "$5.00 (ARC-TESTNET)". Strip the
+                  // trailing chain suffix so both amounts can share one line
+                  // with the chain shown only once at the end.
+                  const stripChain = (s?: string) =>
+                    s?.replace(/\s*\([^)]*\)\s*$/, "").trim() ?? ""
+                  const amounts = [stripChain(balance), stripChain(eurcBalance)]
+                    .filter(Boolean)
+                    .join(" • ")
+                  const chainSuffix = wallet.blockchain
+                    ? ` (${wallet.blockchain})`
+                    : ""
 
                   return (
                     <div key={wallet.id} className="flex items-start gap-4">
@@ -337,13 +381,15 @@ export default function Page() {
                             {shortenAddress(wallet.address)}
                           </a>
                         </p>
-                        {/* Display Skeleton if balance is undefined, otherwise display balance */}
-                        {balance !== undefined ? (
-                          <p className="text-muted-foreground text-xs">
-                            {balance}
-                          </p>
-                        ) : (
+                        {/* Skeleton until the USDC balance resolves, then show
+                            both amounts on one line followed by the chain. */}
+                        {balance === undefined ? (
                           <Skeleton className="h-3 w-10 rounded-sm mt-1" />
+                        ) : (
+                          <p className="text-muted-foreground text-xs">
+                            {amounts}
+                            {chainSuffix}
+                          </p>
                         )}
                       </div>
                     </div>

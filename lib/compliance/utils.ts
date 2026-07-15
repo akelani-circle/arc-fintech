@@ -118,7 +118,6 @@ export function formatComplianceResponse(
   circleResponse: CircleScreeningResponse
 ): ComplianceCheckResponse {
   const result = mapComplianceResult(circleResponse);
-  const blocked = shouldBlockTransfer(result);
 
   let message: string;
   if (result === 'FAIL') {

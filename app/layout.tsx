@@ -27,7 +27,7 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "arc-fintech-starter-app",
+  title: "arc-fintech",
   description: "Modern multi-chain treasury management system",
 };
 

@@ -59,7 +59,7 @@ type Wallet = {
 }
 
 type SortConfig = {
-  key: "balance" | "created_at" | null
+  key: "balance" | "eurc_balance" | "created_at" | null
   direction: "asc" | "desc" | null
 }
 
@@ -67,12 +67,13 @@ const ITEMS_PER_PAGE = 10
 
 export default function Page() {
   const router = useRouter()
-  const { fullWallets, walletBalances, isLoadingData } = useBalanceContext()
+  const { fullWallets, walletBalances, eurcWalletBalances, isLoadingData } = useBalanceContext()
 
   // The shared context owns wallets + their realtime channel + the balance
   // map. We just adapt the row shape here.
   const wallets = fullWallets as unknown as Wallet[]
   const balances = walletBalances
+  const eurcBalances = eurcWalletBalances
   const loading = isLoadingData
 
   // Filter, Pagination & Sorting State
@@ -85,7 +86,7 @@ export default function Page() {
 
   // --- Sorting Logic ---
 
-  const handleSort = (key: "balance" | "created_at") => {
+  const handleSort = (key: "balance" | "eurc_balance" | "created_at") => {
     setSortConfig((current) => {
       if (current.key === key) {
         if (current.direction === "asc") return { key, direction: "desc" }
@@ -97,13 +98,13 @@ export default function Page() {
 
   const parseBalance = (balanceStr?: string) => {
     if (!balanceStr) return 0
-    // Remove '$', commas, and split by space to ignore suffix like " (ETH-SEPOLIA)"
-    const numericPart = balanceStr.split(" ")[0].replace(/[$,]/g, "")
+    // Remove '$'/'€', commas, and split by space to ignore suffix like " (ETH-SEPOLIA)"
+    const numericPart = balanceStr.split(" ")[0].replace(/[$€,]/g, "")
     return parseFloat(numericPart) || 0
   }
 
   const filteredWallets = React.useMemo(() => {
-    let result = wallets.filter((wallet) =>
+    const result = wallets.filter((wallet) =>
       wallet.name.toLowerCase().includes(filter.toLowerCase())
     )
 
@@ -115,6 +116,9 @@ export default function Page() {
         if (sortConfig.key === "balance") {
           valA = parseBalance(balances[a.circle_wallet_id])
           valB = parseBalance(balances[b.circle_wallet_id])
+        } else if (sortConfig.key === "eurc_balance") {
+          valA = parseBalance(eurcBalances[a.circle_wallet_id])
+          valB = parseBalance(eurcBalances[b.circle_wallet_id])
         } else if (sortConfig.key === "created_at") {
           valA = new Date(a.created_at).getTime()
           valB = new Date(b.created_at).getTime()
@@ -127,7 +131,7 @@ export default function Page() {
     }
 
     return result
-  }, [wallets, filter, sortConfig, balances])
+  }, [wallets, filter, sortConfig, balances, eurcBalances])
 
   const totalPages = Math.ceil(filteredWallets.length / ITEMS_PER_PAGE)
 
@@ -136,10 +140,13 @@ export default function Page() {
     return filteredWallets.slice(start, start + ITEMS_PER_PAGE)
   }, [filteredWallets, currentPage])
 
-  // Reset to page 1 when filter changes
-  React.useEffect(() => {
+  // Reset to page 1 when the filter changes. Done during render (React's
+  // "adjust state when a value changes" pattern) instead of an effect.
+  const [prevFilter, setPrevFilter] = React.useState(filter)
+  if (prevFilter !== filter) {
+    setPrevFilter(filter)
     setCurrentPage(1)
-  }, [filter])
+  }
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -151,7 +158,7 @@ export default function Page() {
   }
 
   // Helper to render sort icon
-  const SortIcon = ({ columnKey }: { columnKey: "balance" | "created_at" }) => {
+  const sortIcon = (columnKey: "balance" | "eurc_balance" | "created_at") => {
     if (sortConfig.key !== columnKey) return <IconArrowsSort className="ml-2 h-4 w-4" />
     if (sortConfig.direction === "asc") return <IconArrowUp className="ml-2 h-4 w-4" />
     return <IconArrowDown className="ml-2 h-4 w-4" />
@@ -187,8 +194,18 @@ export default function Page() {
                   onClick={() => handleSort("balance")}
                   className="hover:bg-transparent p-0 font-medium"
                 >
-                  Balance
-                  <SortIcon columnKey="balance" />
+                  USDC
+                  {sortIcon("balance")}
+                </Button>
+              </TableHead>
+              <TableHead className="text-right">
+                <Button
+                  variant="ghost"
+                  onClick={() => handleSort("eurc_balance")}
+                  className="hover:bg-transparent p-0 font-medium"
+                >
+                  EURC
+                  {sortIcon("eurc_balance")}
                 </Button>
               </TableHead>
               <TableHead className="text-right">
@@ -198,7 +215,7 @@ export default function Page() {
                   className="hover:bg-transparent p-0 font-medium"
                 >
                   Created At
-                  <SortIcon columnKey="created_at" />
+                  {sortIcon("created_at")}
                 </Button>
               </TableHead>
             </TableRow>
@@ -212,12 +229,13 @@ export default function Page() {
                   <TableCell><Skeleton className="h-5 w-20" /></TableCell>
                   <TableCell><Skeleton className="h-5 w-40" /></TableCell>
                   <TableCell className="text-right"><Skeleton className="h-5 w-16 ml-auto" /></TableCell>
+                  <TableCell className="text-right"><Skeleton className="h-5 w-16 ml-auto" /></TableCell>
                   <TableCell className="text-right"><Skeleton className="h-5 w-24 ml-auto" /></TableCell>
                 </TableRow>
               ))
             ) : paginatedWallets.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center">
+                <TableCell colSpan={7} className="h-24 text-center">
                   No wallets found.
                 </TableCell>
               </TableRow>
@@ -227,6 +245,10 @@ export default function Page() {
                 // Extract just the amount if needed, or display the full string returned by API
                 // API returns "$100.00 (CHAIN)" or "$0.00"
                 const displayBalance = balanceString ? balanceString.split(' (')[0] : null
+                const eurcBalanceString = eurcBalances[wallet.circle_wallet_id]
+                const displayEurcBalance = eurcBalanceString
+                  ? eurcBalanceString.split(' (')[0]
+                  : null
 
                 return (
                   <TableRow
@@ -297,6 +319,13 @@ export default function Page() {
                     <TableCell className="text-right font-medium">
                       {displayBalance ? (
                         displayBalance
+                      ) : (
+                        <Skeleton className="h-4 w-16 ml-auto" />
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right font-medium">
+                      {displayEurcBalance ? (
+                        displayEurcBalance
                       ) : (
                         <Skeleton className="h-4 w-16 ml-auto" />
                       )}

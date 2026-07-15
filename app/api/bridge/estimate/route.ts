@@ -28,6 +28,24 @@ import {
   SDK_CHAIN_BY_BLOCKCHAIN,
 } from "@/lib/constants/chains";
 
+interface EstimateFee {
+  error?: { message?: string } | null;
+  amount?: string | null;
+  token?: string;
+}
+
+interface EstimateGasFee {
+  fees?: { fee?: string | number } | string | number;
+  blockchain?: string;
+  name?: string;
+  token?: string;
+}
+
+interface BridgeEstimate {
+  fees?: EstimateFee[];
+  gasFees?: EstimateGasFee[];
+}
+
 const bodySchema = z.object({
   sourceWalletId: z.string().min(1),
   sourceChain: blockchainSchema,
@@ -102,7 +120,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
         const balanceData = await fetchGatewayBalance(sourceAddress as `0x${string}`);
         if (balanceData.balances && Array.isArray(balanceData.balances)) {
           // Find balance for the source chain
-          const sourceChainBalance = balanceData.balances.find((b: any) => {
+          const sourceChainBalance = balanceData.balances.find((b: { domain: number; balance: string }) => {
             const domainMapping: Record<number, string> = {
               0: "ethSepolia",
               1: "avalancheFuji",
@@ -162,9 +180,9 @@ export const POST = withAuth(async (request, { user, supabase }) => {
     const [slowEstimate, fastEstimate] = estimates;
 
     // Helper to calculate total fees
-    const calculateTotalFees = (estimate: any, speedType: string) => {
+    const calculateTotalFees = (estimate: BridgeEstimate) => {
       let totalProtocolFees = 0;
-      let gasFeesInfo: Array<{ chain: string; token: string; amount: string }> = [];
+      const gasFeesInfo: Array<{ chain: string; token: string; amount: string }> = [];
       let hasError = false;
       let errorMessage = "";
 
@@ -210,8 +228,8 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       };
     };
 
-    const slowFees = calculateTotalFees(slowEstimate, "SLOW");
-    const fastFees = calculateTotalFees(fastEstimate, "FAST");
+    const slowFees = calculateTotalFees(slowEstimate as unknown as BridgeEstimate);
+    const fastFees = calculateTotalFees(fastEstimate as unknown as BridgeEstimate);
 
     // Log the estimates for debugging
     console.log("SLOW estimate fees:", JSON.stringify(slowEstimate.fees, null, 2));
@@ -220,14 +238,14 @@ export const POST = withAuth(async (request, { user, supabase }) => {
     console.log("FAST calculated:", fastFees);
 
     // Helper function to recursively convert BigInt to strings
-    const serializeBigInt = (obj: any): any => {
+    const serializeBigInt = (obj: unknown): unknown => {
       if (obj === null || obj === undefined) return obj;
       if (typeof obj === 'bigint') return obj.toString();
       if (Array.isArray(obj)) return obj.map(serializeBigInt);
       if (typeof obj === 'object') {
-        const serialized: any = {};
+        const serialized: Record<string, unknown> = {};
         for (const key in obj) {
-          serialized[key] = serializeBigInt(obj[key]);
+          serialized[key] = serializeBigInt((obj as Record<string, unknown>)[key]);
         }
         return serialized;
       }

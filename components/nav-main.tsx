@@ -41,6 +41,18 @@ export function NavMain({
 }) {
   const pathname = usePathname();
 
+  // Highlight the most specific matching item: an item matches when the path
+  // equals its url or is nested under it, and the longest such url wins. This
+  // keeps "Earn" active on nested vault pages (/dashboard/earn/vault) while the
+  // "/dashboard" root only lights up on its own index route rather than every
+  // sub-page.
+  const activeUrl = items
+    .filter(
+      (item) =>
+        pathname === item.url || pathname.startsWith(`${item.url}/`)
+    )
+    .sort((a, b) => b.url.length - a.url.length)[0]?.url;
+
   return (
     <SidebarGroup>
       <SidebarGroupContent className="flex flex-col gap-2">
@@ -48,7 +60,7 @@ export function NavMain({
           {items.map((item) => (
             <SidebarMenuItem key={item.title}>
               <Link href={item.url}>
-                <SidebarMenuButton tooltip={item.title} className={item.url === pathname ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground min-w-8 duration-200 ease-linear" : ""}>
+                <SidebarMenuButton tooltip={item.title} className={item.url === activeUrl ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground min-w-8 duration-200 ease-linear" : ""}>
                   {item.icon && <item.icon />}
                   <span>{item.title}</span>
                 </SidebarMenuButton>

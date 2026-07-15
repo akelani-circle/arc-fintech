@@ -23,7 +23,12 @@ import { createClient } from "@/lib/supabase/server"
 import { BackButton } from "@/components/back-button"
 import { WalletDetailsCard } from "@/components/wallet-details-card"
 import { TransactionDetailsCard } from "@/components/transaction-details-card"
-import { formatWalletDetails, formatTransactionDetails } from "@/lib/utils/data-formatters"
+import {
+  formatWalletDetails,
+  formatTransactionDetails,
+  type WalletDetails,
+  type TransactionDetails,
+} from "@/lib/utils/data-formatters"
 
 async function getDetailsData(type: string, id: string) {
   const supabase = await createClient()
@@ -34,7 +39,7 @@ async function getDetailsData(type: string, id: string) {
     notFound()
   }
 
-  let itemData: any
+  let itemData: WalletDetails | TransactionDetails
 
   if (type === "wallet") {
     // Use the ID directly (no prefix to remove)
@@ -75,7 +80,13 @@ async function getDetailsData(type: string, id: string) {
   return { type, itemData }
 }
 
-function DetailsContent({ type, itemData }: { type: string; itemData: any }) {
+function DetailsContent({
+  type,
+  itemData,
+}: {
+  type: string
+  itemData: WalletDetails | TransactionDetails
+}) {
   return (
     <div className="max-w-2xl mx-auto py-6">
       <div className="mb-6">
@@ -83,9 +94,15 @@ function DetailsContent({ type, itemData }: { type: string; itemData: any }) {
       </div>
 
       {type === "wallet" ? (
-        <WalletDetailsCard wallet={itemData} />
+        <WalletDetailsCard
+          wallet={itemData as unknown as React.ComponentProps<typeof WalletDetailsCard>["wallet"]}
+        />
       ) : (
-        <TransactionDetailsCard transaction={itemData} />
+        <TransactionDetailsCard
+          transaction={
+            itemData as unknown as React.ComponentProps<typeof TransactionDetailsCard>["transaction"]
+          }
+        />
       )}
     </div>
   )
@@ -100,15 +117,15 @@ export default async function DetailsPage({ params }: { params: Promise<{ type: 
 }
 
 async function AsyncDetailsContent({ params }: { params: Promise<{ type: string; id: string }> }) {
+  let data: Awaited<ReturnType<typeof getDetailsData>>
   try {
-    const resolvedParams = await params
-    const { type, id } = resolvedParams
-    const data = await getDetailsData(type, id)
-    return <DetailsContent type={data.type} itemData={data.itemData} />
+    const { type, id } = await params
+    data = await getDetailsData(type, id)
   } catch (error) {
     console.error("Error loading details:", error)
     notFound()
   }
+  return <DetailsContent type={data.type} itemData={data.itemData} />
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ type: string; id: string }> }): Promise<Metadata> {

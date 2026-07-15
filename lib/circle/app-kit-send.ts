@@ -16,6 +16,8 @@ import {
   type CircleWalletsAdapter,
 } from "@circle-fin/adapter-circle-wallets";
 import { APP_KIT_CHAIN_BY_BLOCKCHAIN, type AppKitChain } from "@/lib/constants/chains";
+import { CHAIN_TO_EURC_ADDRESS } from "@/lib/constants/eurc-addresses";
+import type { Currency } from "@/lib/constants/currency";
 
 const NETWORK_TIMEOUT = 3002;
 const BALANCE_INSUFFICIENT_TOKEN = 9001;
@@ -65,6 +67,8 @@ export interface AppKitSendInput {
   sourceWalletAddress: string;
   recipientAddress: string;
   amount: string;
+  /** Defaults to "USDC". "EURC" sends the EURC contract address for the chain instead. */
+  token?: Currency;
 }
 
 export interface AppKitSendResult {
@@ -93,6 +97,19 @@ export function buildAppKitSendParams(
     throw new Error("Missing source wallet address.");
   }
 
+  // TokenAlias only knows 'USDC'/'USDT'/'NATIVE' — no EURC alias — but App
+  // Kit's send() also accepts a raw ERC-20 contract address, so EURC sends
+  // pass the chain's EURC address directly instead of a symbol alias.
+  const token =
+    input.token === "EURC"
+      ? CHAIN_TO_EURC_ADDRESS[input.sourceBlockchain]
+      : "USDC";
+  if (!token) {
+    throw new Error(
+      `EURC is not configured for source blockchain: ${input.sourceBlockchain}`
+    );
+  }
+
   return {
     from: {
       adapter,
@@ -101,7 +118,7 @@ export function buildAppKitSendParams(
     },
     to: input.recipientAddress,
     amount: input.amount,
-    token: "USDC",
+    token,
   };
 }
 

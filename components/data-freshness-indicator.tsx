@@ -35,53 +35,63 @@ interface DataFreshnessIndicatorProps {
   className?: string
 }
 
+// Ticks `Date.now()` on an interval through an external store. The current
+// time is read inside `subscribe` (commit phase) and the interval callback —
+// never during render — so SSR/hydration stay pure. Server snapshot is 0.
+function useNow(intervalMs: number): number {
+  const valueRef = React.useRef(0)
+  const subscribe = React.useCallback((onStoreChange: () => void) => {
+    valueRef.current = Date.now()
+    onStoreChange()
+    const id = setInterval(() => {
+      valueRef.current = Date.now()
+      onStoreChange()
+    }, intervalMs)
+    return () => clearInterval(id)
+  }, [intervalMs])
+  const getSnapshot = React.useCallback(() => valueRef.current, [])
+  return React.useSyncExternalStore(subscribe, getSnapshot, () => 0)
+}
+
+// Pure derivation from the (prop) timestamp and the current time. `new Date`
+// here only parses `lastUpdated`; it never reads the clock.
+function computeFreshness(lastUpdated: Date | string | null, now: number) {
+  if (!lastUpdated || !now) {
+    return { timeAgo: "Syncing...", freshnessColor: "bg-gray-500" }
+  }
+
+  const diffMins = Math.floor(
+    (now - new Date(lastUpdated).getTime()) / (1000 * 60)
+  )
+
+  let timeAgo: string
+  if (diffMins < 1) timeAgo = "Just now"
+  else if (diffMins < 60) timeAgo = `${diffMins}m ago`
+  else if (diffMins < 1440) timeAgo = `${Math.floor(diffMins / 60)}h ago`
+  else timeAgo = `${Math.floor(diffMins / 1440)}d ago`
+
+  let freshnessColor: string
+  if (diffMins < 5) freshnessColor = "bg-green-500"
+  else if (diffMins < 30) freshnessColor = "bg-yellow-500"
+  else freshnessColor = "bg-red-500"
+
+  return { timeAgo, freshnessColor }
+}
+
 export function DataFreshnessIndicator({
   lastUpdated,
   isRefreshing = false,
   onRefresh,
   className = ""
 }: DataFreshnessIndicatorProps) {
-  // Both pieces of state derive from `Date.now()`, which Next.js 16 forbids
-  // during client render. Compute them in the 30s interval effect instead.
-  const [timeAgo, setTimeAgo] = React.useState("")
-  const [freshnessColor, setFreshnessColor] = React.useState("bg-gray-500")
-
-  React.useEffect(() => {
-    if (!lastUpdated) {
-      setTimeAgo("Syncing...")
-      setFreshnessColor("bg-gray-500")
-      return
-    }
-
-    const tick = () => {
-      const now = new Date()
-      const updated = new Date(lastUpdated)
-      const diffMins = Math.floor(
-        (now.getTime() - updated.getTime()) / (1000 * 60)
-      )
-
-      if (diffMins < 1) {
-        setTimeAgo("Just now")
-      } else if (diffMins < 60) {
-        setTimeAgo(`${diffMins}m ago`)
-      } else if (diffMins < 1440) {
-        const hours = Math.floor(diffMins / 60)
-        setTimeAgo(`${hours}h ago`)
-      } else {
-        const days = Math.floor(diffMins / 1440)
-        setTimeAgo(`${days}d ago`)
-      }
-
-      if (diffMins < 5) setFreshnessColor("bg-green-500")
-      else if (diffMins < 30) setFreshnessColor("bg-yellow-500")
-      else setFreshnessColor("bg-red-500")
-    }
-
-    tick()
-    const interval = setInterval(tick, 30000)
-
-    return () => clearInterval(interval)
-  }, [lastUpdated])
+  // Both pieces derive from `Date.now()`, which Next.js 16 forbids during
+  // client render. `useNow` sources the time from an external store (read off
+  // the render path) and we derive the display values purely from it.
+  const now = useNow(30000)
+  const { timeAgo, freshnessColor } = React.useMemo(
+    () => computeFreshness(lastUpdated, now),
+    [lastUpdated, now]
+  )
 
   return (
     <TooltipProvider>

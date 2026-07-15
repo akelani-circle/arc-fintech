@@ -299,7 +299,7 @@ describe("normalizeUnifiedBalanceGatewaySpendResult", () => {
           { type: "provider", token: "USDC", amount: "0.10" },
           { type: "forwarder", token: "USDC", amount: "0.01" },
         ],
-      } as any,
+      } as unknown as Parameters<typeof normalizeUnifiedBalanceGatewaySpendResult>[0],
       "arcTestnet"
     );
 
@@ -318,7 +318,7 @@ describe("normalizeUnifiedBalanceGatewaySpendResult", () => {
         txHash: "0xmint",
         allocations: [{ amount: "1.00", chain: "Unknown_Chain" }],
         fees: [{ type: "provider", token: "USDC", amount: "not-a-number" }],
-      } as any,
+      } as unknown as Parameters<typeof normalizeUnifiedBalanceGatewaySpendResult>[0],
       "arcTestnet"
     );
 
@@ -349,7 +349,7 @@ describe("normalizeUnifiedBalanceGatewaySpendResult", () => {
           },
         ],
         fees: [{ type: "provider", token: "USDC", amount: "0.03" }],
-      } as any,
+      } as unknown as Parameters<typeof normalizeUnifiedBalanceGatewaySpendResult>[0],
       "ethSepolia"
     );
 
