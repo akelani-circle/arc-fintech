@@ -61,6 +61,8 @@ type BalanceContextType = {
    * These are funds the user has not yet deposited into Gateway.
    */
   chainBalances: ChainBalances
+  /** Same shape as `chainBalances`, denominated in EURC. */
+  eurcChainBalances: ChainBalances
   /** Confirmed Gateway balance per chain. */
   gatewayChainBalances: ChainBalances
   /** Pending Gateway balance per chain. */
@@ -73,8 +75,13 @@ type BalanceContextType = {
   walletBalances: Record<string, string>
   walletTotal: number
 
+  /** Same shape as `walletBalances`/`walletTotal`, denominated in EURC. */
+  eurcWalletBalances: Record<string, string>
+  eurcWalletTotal: number
+
   isLoadingGateway: boolean
   isLoadingWallet: boolean
+  isLoadingEurcWallet: boolean
   isLoadingData: boolean
 
   /** Slim wallet list used internally (exposed for legacy consumers). */
@@ -122,6 +129,9 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
   const [chainBalances, setChainBalances] = useState<ChainBalances>({
     ...EMPTY_CHAIN_BALANCES,
   })
+  const [eurcChainBalances, setEurcChainBalances] = useState<ChainBalances>({
+    ...EMPTY_CHAIN_BALANCES,
+  })
   const [gatewayChainBalances, setGatewayChainBalances] = useState<ChainBalances>({
     ...EMPTY_CHAIN_BALANCES,
   })
@@ -135,6 +145,10 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
   const [walletBalances, setWalletBalances] = useState<Record<string, string>>({})
   const [walletTotal, setWalletTotal] = useState(0)
   const [isLoadingWallet, setIsLoadingWallet] = useState(true)
+
+  const [eurcWalletBalances, setEurcWalletBalances] = useState<Record<string, string>>({})
+  const [eurcWalletTotal, setEurcWalletTotal] = useState(0)
+  const [isLoadingEurcWallet, setIsLoadingEurcWallet] = useState(true)
 
   const gatewayDebounceRef = useRef<NodeJS.Timeout | null>(null)
   const walletDebounceRef = useRef<NodeJS.Timeout | null>(null)
@@ -155,6 +169,8 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
       const summary = await fetchGatewayBalanceApi(currentWallets)
       // `totals` is on-wallet (un-deposited) USDC per chain via viem.
       setChainBalances(summary.totals)
+      // `eurcTotals` is the EURC equivalent of `totals`.
+      setEurcChainBalances(summary.eurcTotals)
       // `gatewayTotals` is confirmed Gateway balance per chain via App Kit.
       setGatewayChainBalances(summary.gatewayTotals)
       setGatewayPendingChainBalances(summary.gatewayPendingTotals)
@@ -184,6 +200,21 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const loadEurcWalletBalance = useCallback(async (currentWallets: Wallet[]) => {
+    try {
+      const data = await fetchWalletBalanceApi(currentWallets, "EURC")
+      setEurcWalletBalances((prev) => {
+        const newBalances = { ...prev, ...data }
+        setEurcWalletTotal(computeWalletTotal(walletsRef.current, newBalances))
+        return newBalances
+      })
+    } catch (error) {
+      console.error("Error fetching EURC wallet balance:", error)
+    } finally {
+      setIsLoadingEurcWallet(false)
+    }
+  }, [])
+
   // Debounced refreshers — used by Realtime handlers so a burst of webhook
   // UPDATEs collapses into a single Circle round-trip.
   const debouncedGatewayRefresh = useCallback(() => {
@@ -207,8 +238,9 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
         : DEBOUNCE_DELAY
     walletDebounceRef.current = setTimeout(() => {
       loadWalletBalance(walletsRef.current)
+      loadEurcWalletBalance(walletsRef.current)
     }, delay)
-  }, [loadWalletBalance])
+  }, [loadWalletBalance, loadEurcWalletBalance])
 
   // Manual refreshers used by dialogs after a user-initiated action — they
   // bypass debouncing because the user expects immediate feedback.
@@ -217,11 +249,19 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
   }, [loadGatewayBalance])
 
   const refreshWalletBalance = useCallback(async () => {
-    await loadWalletBalance(walletsRef.current)
-  }, [loadWalletBalance])
+    await Promise.all([
+      loadWalletBalance(walletsRef.current),
+      loadEurcWalletBalance(walletsRef.current),
+    ])
+  }, [loadWalletBalance, loadEurcWalletBalance])
 
   useEffect(() => {
     let channel: RealtimeChannel | null = null
+    // `setupData` subscribes only after several awaits. If the effect is torn
+    // down (StrictMode double-mount, Fast Refresh, dep change) before then,
+    // this flag stops a stale, already-subscribed channel from being leaked —
+    // which otherwise trips ".on() after subscribe()" on the re-run.
+    let cancelled = false
 
     const setupData = async () => {
       try {
@@ -275,7 +315,10 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
         await Promise.all([
           loadGatewayBalance(initialWallets),
           loadWalletBalance(initialWallets),
+          loadEurcWalletBalance(initialWallets),
         ])
+
+        if (cancelled) return
 
         channel = subscribeBalanceRealtime({
           supabase,
@@ -311,6 +354,7 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
                 const updated = [slim, ...prev]
                 walletsRef.current = updated
                 loadWalletBalance([slim])
+                loadEurcWalletBalance([slim])
                 const isNewAddress = !prev.some(
                   (w) =>
                     !!w.address &&
@@ -349,6 +393,7 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
                   const updated = [slim, ...prev]
                   walletsRef.current = updated
                   loadWalletBalance([slim])
+                  loadEurcWalletBalance([slim])
                   debouncedGatewayRefresh()
                   return updated
                 }
@@ -367,6 +412,7 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
                   setGatewayChainBalances({ ...EMPTY_CHAIN_BALANCES })
                   setGatewayPendingChainBalances({ ...EMPTY_CHAIN_BALANCES })
                   setWalletTotal(0)
+                  setEurcWalletTotal(0)
                 }
                 return updated
               })
@@ -419,6 +465,14 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
             }
           },
         })
+
+        // Raced past the guard above: the effect was torn down while
+        // `subscribeBalanceRealtime` was in flight. Remove the channel we just
+        // created so the next run starts clean.
+        if (cancelled) {
+          supabase.removeChannel(channel)
+          channel = null
+        }
       } catch (error) {
         console.error("Error setting up balance context:", error)
         setIsLoadingGateway(false)
@@ -430,6 +484,7 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
     setupData()
 
     return () => {
+      cancelled = true
       if (channel) supabase.removeChannel(channel)
       if (gatewayDebounceRef.current) clearTimeout(gatewayDebounceRef.current)
       if (walletDebounceRef.current) clearTimeout(walletDebounceRef.current)
@@ -438,6 +493,7 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
     supabase,
     loadGatewayBalance,
     loadWalletBalance,
+    loadEurcWalletBalance,
     debouncedGatewayRefresh,
     debouncedWalletRefresh,
   ])
@@ -446,14 +502,18 @@ export function BalanceProvider({ children }: { children: ReactNode }) {
     <BalanceContext.Provider
       value={{
         chainBalances,
+        eurcChainBalances,
         gatewayChainBalances,
         gatewayPendingChainBalances,
         gatewayTotal,
         gatewayPending,
         walletBalances,
         walletTotal,
+        eurcWalletBalances,
+        eurcWalletTotal,
         isLoadingGateway,
         isLoadingWallet,
+        isLoadingEurcWallet,
         isLoadingData,
         wallets,
         fullWallets,

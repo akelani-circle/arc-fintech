@@ -65,16 +65,20 @@ export function useBridgeFeeEstimates({
   const [feeEstimates, setFeeEstimates] = useState<BridgeFeeEstimateState>(EMPTY)
   const [isEstimating, setIsEstimating] = useState(false)
 
+  const invalid =
+    !sourceWallet ||
+    !destinationWallet ||
+    !amount ||
+    parseFloat(amount) <= 0
+
+  // Clear stale estimates as soon as the inputs are invalid — during render,
+  // guarded by the stable EMPTY sentinel so it can't re-render loop.
+  if (invalid && feeEstimates !== EMPTY) {
+    setFeeEstimates(EMPTY)
+  }
+
   useEffect(() => {
-    if (
-      !sourceWallet ||
-      !destinationWallet ||
-      !amount ||
-      parseFloat(amount) <= 0
-    ) {
-      setFeeEstimates(EMPTY)
-      return
-    }
+    if (invalid) return
 
     let cancelled = false
     const timer = setTimeout(async () => {
@@ -118,7 +122,7 @@ export function useBridgeFeeEstimates({
       cancelled = true
       clearTimeout(timer)
     }
-  }, [sourceWallet, destinationWallet, amount, onRecommendation])
+  }, [invalid, sourceWallet, destinationWallet, amount, onRecommendation])
 
   const reset = () => setFeeEstimates(EMPTY)
 

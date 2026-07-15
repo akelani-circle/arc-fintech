@@ -24,6 +24,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
+import type { Blockchain } from "@circle-fin/developer-controlled-wallets";
 
 export interface GatewayEOAWallet {
   chain: string;
@@ -49,7 +50,7 @@ export async function generateGatewayEOAWallets(walletSetId: string): Promise<Ga
   const response = await circleDeveloperSdk.createWallets({
     walletSetId,
     accountType: "EOA", // Explicitly specify EOA type
-    blockchains: chains.map(c => c.id) as any[],
+    blockchains: chains.map(c => c.id) as Blockchain[],
     count: 1, // 1 wallet per blockchain
   });
 

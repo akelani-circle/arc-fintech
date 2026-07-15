@@ -27,7 +27,6 @@ import { ComplianceCheckResponse } from "@/types/compliance";
 import {
   Table,
   TableBody,
-  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -181,9 +180,6 @@ export default function CompliancePage() {
   };
 
   const hasActiveFilters = resultFilter !== "all" || blockchainFilter !== "all" || startDate || endDate;
-
-  // Get unique blockchains from logs for filter options
-  const availableBlockchains = Array.from(new Set(logs.map(log => log.blockchain)));
 
   return (
     <div className="flex flex-col gap-4 p-4 md:p-6">

@@ -20,6 +20,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { validateJsonBody, evmAddressSchema } from "@/lib/api/validate";
 import { withAuth } from "@/lib/api/with-auth";
+import { CURRENCIES } from "@/lib/constants/currency";
 import {
   getAppKitSendError,
   sendUsdcOnSameChainWithAppKit,
@@ -32,13 +33,14 @@ const bodySchema = z.object({
     .union([z.string(), z.number()])
     .transform((v) => (typeof v === "string" ? Number(v) : v))
     .refine((n) => Number.isFinite(n) && n > 0, "Amount must be positive"),
+  currency: z.enum(CURRENCIES).default("USDC"),
 });
 
 export const POST = withAuth(async (req, { user, supabase }) => {
   try {
     const parsed = await validateJsonBody(req, bodySchema);
     if (!parsed.ok) return parsed.response;
-    const { sourceWalletId, destinationAddress, amount } = parsed.data;
+    const { sourceWalletId, destinationAddress, amount, currency } = parsed.data;
 
     // 1. Fetch Source Wallet to get its blockchain
     const { data: sourceWallet, error: sourceError } = await supabase
@@ -62,6 +64,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       sourceWalletAddress: sourceWallet.address,
       recipientAddress: destinationAddress,
       amount: amount.toString(),
+      token: currency,
     });
 
     // 4. Log to Transactions Table
@@ -75,6 +78,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         circle_transaction_id: sendResult.txId,
         blockchain: sourceWallet.blockchain,
         type: "OUTBOUND",
+        currency,
         status: "PENDING",
       },
     ]);

@@ -46,7 +46,6 @@ interface GlobalSearchProps {
 export function GlobalSearch({ wallets, transactions, className }: GlobalSearchProps) {
   const [open, setOpen] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState("")
-  const [searchResults, setSearchResults] = React.useState<SearchResult[]>([])
   const router = useRouter()
   const containerRef = React.useRef<HTMLDivElement>(null)
 
@@ -63,14 +62,15 @@ export function GlobalSearch({ wallets, transactions, className }: GlobalSearchP
     }
   }, [])
 
-  const search = React.useCallback((query: string) => {
-    if (!query || !query.trim()) {
-      setSearchResults([])
-      return
+  // Search results are a pure derivation of the query + data — no effect/state
+  // needed. Recomputes only when the query or the underlying lists change.
+  const searchResults = React.useMemo<SearchResult[]>(() => {
+    if (!searchQuery || !searchQuery.trim()) {
+      return []
     }
 
     const results: SearchResult[] = []
-    const lowerQuery = query.toLowerCase()
+    const lowerQuery = searchQuery.toLowerCase()
 
     // Search wallets
     wallets.forEach((wallet) => {
@@ -111,12 +111,8 @@ export function GlobalSearch({ wallets, transactions, className }: GlobalSearchP
       }
     })
 
-    setSearchResults(results.slice(0, 6))
-  }, [wallets, transactions])
-
-  React.useEffect(() => {
-    search(searchQuery)
-  }, [searchQuery, search])
+    return results.slice(0, 6)
+  }, [searchQuery, wallets, transactions])
 
   const handleSelect = React.useCallback((result: SearchResult, event?: React.MouseEvent) => {
     // Prevent event propagation and handle navigation
@@ -147,7 +143,6 @@ export function GlobalSearch({ wallets, transactions, className }: GlobalSearchP
   const handleClear = React.useCallback(() => {
     setSearchQuery("")
     setOpen(false)
-    setSearchResults([])
   }, [])
 
   const getIcon = (type: string) => {

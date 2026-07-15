@@ -44,7 +44,14 @@ export type FullTransaction = {
   recipient_address: string
   blockchain: string
   status: "PENDING" | "CONFIRMED" | "COMPLETE" | "FAILED"
-  type: "INBOUND" | "OUTBOUND" | "REBALANCE"
+  type:
+    | "INBOUND"
+    | "OUTBOUND"
+    | "REBALANCE"
+    | "EARN_DEPOSIT"
+    | "EARN_WITHDRAW"
+    | "SWAP"
+  currency: "USDC" | "EURC"
   tx_hash: string | null
   circle_transaction_id: string | null
   created_at: string

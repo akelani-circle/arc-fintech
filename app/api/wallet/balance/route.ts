@@ -18,7 +18,7 @@
 
 import { NextResponse } from "next/server";
 import { circleDeveloperSdk } from "@/lib/circle/developer-controlled-wallets-client";
-import { getUsdcBalance, type SupportedChain, USDC_ADDRESSES } from "@/lib/circle/gateway-sdk";
+import { getUsdcBalance, type SupportedChain } from "@/lib/circle/gateway-sdk";
 import type { Address } from "viem";
 import { withAuth } from "@/lib/api/with-auth";
 
@@ -27,6 +27,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
     // Extract walletIds from the request body
     const body = await req.json();
     let walletIds: string[] = body?.walletIds;
+    const token: "USDC" | "EURC" = body?.token === "EURC" ? "EURC" : "USDC";
 
     if (!walletIds || !Array.isArray(walletIds) || walletIds.length === 0) {
       return NextResponse.json({ error: "Invalid walletIds provided" }, { status: 400 });
@@ -92,19 +93,23 @@ export const POST = withAuth(async (req, { user, supabase }) => {
           // The SDK returns an array of token balances for this specific wallet
           const tokenBalances = response.data?.tokenBalances || [];
 
-          // Strictly look for USDC (USDC-TESTNET included)
-          const usdcBalance = tokenBalances.find((b) => b.token.symbol?.startsWith("USDC"));
+          // USDC symbols come back as "USDC" or "USDC-TESTNET"; EURC is exact.
+          const tokenBalance =
+            token === "USDC"
+              ? tokenBalances.find((b) => b.token.symbol?.startsWith("USDC"))
+              : tokenBalances.find((b) => b.token.symbol === "EURC");
 
-          if (usdcBalance) {
-            const amount = parseFloat(usdcBalance.amount).toFixed(2);
-            balancesMap[id] = `$${amount}${chainSuffix}`;
+          const symbol = token === "EURC" ? "€" : "$";
+          if (tokenBalance) {
+            const amount = parseFloat(tokenBalance.amount).toFixed(2);
+            balancesMap[id] = `${symbol}${amount}${chainSuffix}`;
           } else {
-            balancesMap[id] = `$0.00${chainSuffix}`;
+            balancesMap[id] = `${symbol}0.00${chainSuffix}`;
           }
         } catch (innerError) {
           console.error(`Failed to fetch balance for wallet ${id}:`, innerError);
-          // We default to $0.00 if fetching fails for a specific wallet
-          balancesMap[id] = `$0.00${chainSuffix}`;
+          // We default to 0.00 if fetching fails for a specific wallet
+          balancesMap[id] = `${token === "EURC" ? "€" : "$"}0.00${chainSuffix}`;
         }
       })
     );
@@ -125,6 +130,14 @@ export const POST = withAuth(async (req, { user, supabase }) => {
 
     await Promise.all(
       gatewayWalletIds.map(async (id: string) => {
+        // Gateway signer wallets only custody USDC on-chain — they never hold
+        // EURC. Emit an empty marker for the EURC pass so the client doesn't
+        // render a duplicate USDC-denominated line under the wallet.
+        if (token === "EURC") {
+          balancesMap[id] = "";
+          return;
+        }
+
         const blockchain = chainMap.get(id) || "";
         const address = addressMap.get(id);
         const chain = blockchainToChain[blockchain];

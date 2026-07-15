@@ -13,7 +13,9 @@
 import * as React from "react"
 import {
   IconArrowsLeftRight,
+  IconArrowsUpDown,
   IconLoader,
+  IconMinus,
   IconPlus,
   IconWallet,
 } from "@tabler/icons-react"
@@ -23,6 +25,7 @@ import {
   shortenAddress,
   getExplorerUrl,
 } from "@/lib/utils/data-formatters"
+import { otherCurrency } from "@/lib/constants/currency"
 import type {
   FullTransaction,
   FullWallet,
@@ -30,7 +33,7 @@ import type {
 
 type ActivityItem = {
   id: string
-  type: "wallet_created" | "transfer" | "deposit"
+  type: "wallet_created" | "transfer" | "deposit" | "withdrawal" | "swap"
   title: React.ReactNode
   description: React.ReactNode
   timestamp: string
@@ -87,6 +90,84 @@ export function ActivityFeed({
     }))
 
     const txItems: ActivityItem[] = transactions.map((tx) => {
+      if (tx.type === "SWAP") {
+        return {
+          id: `tx-${tx.id}`,
+          type: "swap",
+          title: (
+            <span>
+              {(tx.amount ?? 0).toLocaleString("en-US", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{" "}
+              {tx.currency}
+            </span>
+          ),
+          timestamp: tx.created_at,
+          icon: IconArrowsUpDown,
+          description: (
+            <span>
+              {tx.currency} → {otherCurrency(tx.currency)} on{" "}
+              {shortenAddress(tx.sender_address)}
+            </span>
+          ),
+        }
+      }
+
+      // Vault deposits/withdrawals (EarnKit). Labelled explicitly so they don't
+      // fall through to the generic wallet-to-wallet "transfer" rendering below.
+      // Deposit: wallet -> vault (vault is recipient); withdraw: vault -> wallet.
+      if (tx.type === "EARN_DEPOSIT" || tx.type === "EARN_WITHDRAW") {
+        const isVaultDeposit = tx.type === "EARN_DEPOSIT"
+        const vaultAddress = isVaultDeposit
+          ? tx.recipient_address
+          : tx.sender_address
+        const vaultLink = tx.blockchain ? (
+          <a
+            href={getExplorerUrl(tx.blockchain, vaultAddress)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono hover:text-primary hover:underline transition-colors"
+          >
+            {shortenAddress(vaultAddress)}
+          </a>
+        ) : (
+          <span className="font-mono">{shortenAddress(vaultAddress)}</span>
+        )
+        return {
+          id: `tx-${tx.id}`,
+          type: isVaultDeposit ? "deposit" : "withdrawal",
+          title: (
+            <span>
+              ${(tx.amount ?? 0).toLocaleString("en-US", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+            </span>
+          ),
+          timestamp: tx.created_at,
+          // Reuse the gateway-deposit icon so gateway and vault deposits read the
+          // same; withdrawals get its inverse. The "Vault" counterparty label
+          // mirrors gateway's "Gateway Balance".
+          icon: isVaultDeposit ? IconPlus : IconMinus,
+          description: isVaultDeposit ? (
+            <span>
+              <span className="font-mono">
+                {shortenAddress(tx.sender_address)}
+              </span>{" "}
+              → Vault {vaultLink}
+            </span>
+          ) : (
+            <span>
+              Vault {vaultLink} →{" "}
+              <span className="font-mono">
+                {shortenAddress(tx.recipient_address)}
+              </span>
+            </span>
+          ),
+        }
+      }
+
       const isDeposit = isGatewayDepositRecipient(tx.recipient_address)
 
       if (isDeposit) {
@@ -137,10 +218,12 @@ export function ActivityFeed({
         type: "transfer",
         title: (
           <span>
-            ${(tx.amount ?? 0).toLocaleString("en-US", {
+            {tx.currency === "EURC" ? "" : "$"}
+            {(tx.amount ?? 0).toLocaleString("en-US", {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
+            {tx.currency === "EURC" ? " EURC" : ""}
           </span>
         ),
         timestamp: tx.created_at,

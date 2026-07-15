@@ -28,18 +28,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Laptop, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
+import { useHydrated } from "@/hooks/use-hydrated";
 
 const ThemeSwitcher = () => {
-  const [mounted, setMounted] = useState(false);
+  const hydrated = useHydrated();
   const { theme, setTheme } = useTheme();
 
-  // useEffect only runs on the client, so now we can safely show the UI
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) {
+  // Theme is only known on the client; render nothing until hydrated so SSR
+  // and the first client render agree.
+  if (!hydrated) {
     return null;
   }
 

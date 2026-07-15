@@ -81,7 +81,7 @@ export const GET = withAuth(async (request, { user, supabase }) => {
           ? "Transfer in progress - Bridge Kit is automatically handling attestation and minting"
           : "Transfer failed",
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Monitor error:", error);
     return NextResponse.json(
       {
