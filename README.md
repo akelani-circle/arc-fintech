@@ -6,12 +6,24 @@ Modern multi-chain treasury management system. This sample application uses Next
 
 ## Table of Contents
 
+- [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Getting Started](#getting-started)
 - [How It Works](#how-it-works)
 - [Webhooks & Real-Time Updates](#webhooks--real-time-updates)
 - [Environment Variables](#environment-variables)
 - [User Accounts](#user-accounts)
+
+## Features
+
+The dashboard is organized into a set of pages, each backed by Circle APIs:
+
+- **Treasury overview** (`/dashboard`) — Aggregated multi-chain USDC and EURC balances, including a unified cross-chain balance via Circle Gateway.
+- **Wallets** (`/dashboard/wallets`) — Create and manage Developer-Controlled Wallets across supported chains and view per-network USDC/EURC balances.
+- **Swap** (`/dashboard/swap`) — Swap USDC ⇄ EURC on Arc Testnet via App Kit (`kit.swap` / `kit.estimateSwap`). Requires a `KIT_KEY`.
+- **Earn** (`/dashboard/earn`) — Discover USDC vaults on Arc Testnet with EarnKit, deposit, withdraw, and track positions. (Reward accrual is mocked — see [How It Works](#how-it-works).)
+- **Activity** (`/dashboard/activity`) — A unified transaction history spanning transfers, bridges, swaps, and vault operations.
+- **Compliance** (`/dashboard/compliance`) — Screen addresses with Circle's Compliance Engine before initiating transfers.
 
 ## Prerequisites
 
@@ -140,6 +152,7 @@ ARC_TESTNET_RPC_KEY=
 | `KIT_KEY` | Server-side | Circle Kit Key, shared by EarnKit and App Kit Swap. **Optional for Earn** — it runs permissionlessly without one. **Required for Swap** — the Stablecoin Service rejects an empty kit key, so the Swap page will not work without it. Setting it also enables integrator attribution and higher rate limits. Get a free key from the Circle Console. Format: `KIT_KEY:<keyId>:<keySecret>`. |
 | `WEBHOOK_ENDPOINT_URL` | Server-side | Public HTTPS URL Circle posts notifications to (e.g. your ngrok tunnel + `/api/circle/webhook`). Used to create/sync the standard and Gateway webhook subscriptions. If unset, falls back to `${NEXT_PUBLIC_APP_URL}/api/circle/webhook` and registration is skipped when neither is set. |
 | `GATEWAY_WEBHOOK_ENDPOINT_URL` | Server-side | Optional. Dedicated endpoint for the Gateway *permissionless* subscription. Circle requires a unique URL per subscription, so this must differ from `WEBHOOK_ENDPOINT_URL`. If unset, it is derived by swapping the path to `/api/circle/gateway-webhook`. |
+| `NEXT_PUBLIC_APP_URL` | Public | Optional. Base URL of the deployed app, used as a fallback to derive the webhook endpoints when `WEBHOOK_ENDPOINT_URL` / `GATEWAY_WEBHOOK_ENDPOINT_URL` are unset. Not required for local development when `WEBHOOK_ENDPOINT_URL` is set. |
 | `ARC_TESTNET_RPC_KEY` | Server-side | Optional. API key for Arc Testnet RPC reads; without it, a rate-limited public RPC is used. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side | Only needed by the `npm run webhooks:register` backfill script, which reads wallet addresses directly. The app itself uses `SUPABASE_SECRET_KEY`. |
 
