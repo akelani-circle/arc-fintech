@@ -130,6 +130,14 @@ export const POST = withAuth(async (req, { user, supabase }) => {
 
     await Promise.all(
       gatewayWalletIds.map(async (id: string) => {
+        // Gateway signer wallets only custody USDC on-chain — they never hold
+        // EURC. Emit an empty marker for the EURC pass so the client doesn't
+        // render a duplicate USDC-denominated line under the wallet.
+        if (token === "EURC") {
+          balancesMap[id] = "";
+          return;
+        }
+
         const blockchain = chainMap.get(id) || "";
         const address = addressMap.get(id);
         const chain = blockchainToChain[blockchain];

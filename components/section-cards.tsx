@@ -24,15 +24,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useBalanceContext } from "@/lib/contexts/balance-context"
 
 // Configuration for the cards we want to display
 const CHAIN_CONFIG = [
-  { key: "arcTestnet", label: "Arc Testnet Balance" },
-  { key: "baseSepolia", label: "Base Sepolia Balance" },
-  { key: "avalancheFuji", label: "Avalanche Fuji Balance" },
-  { key: "ethSepolia", label: "Ethereum Sepolia Balance" },
+  { key: "arcTestnet", label: "Arc Testnet" },
+  { key: "baseSepolia", label: "Base Sepolia" },
+  { key: "avalancheFuji", label: "Avalanche Fuji" },
+  { key: "ethSepolia", label: "Ethereum Sepolia" },
 ] as const
 
 export function SectionCards() {
@@ -43,27 +44,43 @@ export function SectionCards() {
       {CHAIN_CONFIG.map((chain) => (
         <Card key={chain.key} className="@container/card">
           <CardHeader>
-            <CardDescription>{chain.label}</CardDescription>
-            <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-              {isLoadingGateway ? (
-                <Skeleton className="h-8 w-24" />
-              ) : (
-                `$${(chainBalances[chain.key] || 0).toLocaleString("en-US", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}`
-              )}
-            </CardTitle>
-            <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-              {isLoadingGateway ? (
-                <Skeleton className="h-8 w-24" />
-              ) : (
-                `€${(eurcChainBalances[chain.key] || 0).toLocaleString("en-US", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}`
-              )}
-            </CardTitle>
+            <CardDescription className="font-bold">{chain.label}</CardDescription>
+            <div className="flex items-stretch gap-4">
+              <div className="flex flex-1 flex-col gap-1">
+                <span className="text-muted-foreground text-xs font-medium">
+                  USDC
+                </span>
+                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+                  {isLoadingGateway ? (
+                    <Skeleton className="h-8 w-24" />
+                  ) : (
+                    `$${(chainBalances[chain.key] || 0).toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}`
+                  )}
+                </CardTitle>
+              </div>
+              <Separator
+                orientation="vertical"
+                className="data-[orientation=vertical]:h-auto"
+              />
+              <div className="flex flex-1 flex-col gap-1">
+                <span className="text-muted-foreground text-xs font-medium">
+                  EURC
+                </span>
+                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+                  {isLoadingGateway ? (
+                    <Skeleton className="h-8 w-24" />
+                  ) : (
+                    `€${(eurcChainBalances[chain.key] || 0).toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}`
+                  )}
+                </CardTitle>
+              </div>
+            </div>
           </CardHeader>
         </Card>
       ))}
