@@ -56,7 +56,7 @@ import {
   getAddress,
   type Address,
 } from "viem"
-import { arcTestnet } from "@/lib/circle/gateway-sdk"
+import { arcTestnet, withRetry as withRpcRetry } from "@/lib/circle/gateway-sdk"
 
 export interface ExploreFilters {
   protocol?: string
@@ -190,12 +190,14 @@ export async function sumEarnHoldingsOnChain(
   await Promise.all(
     pairs.map(async ({ vaultAddress, walletAddress }) => {
       try {
-        const shares = await client.readContract({
-          address: getAddress(vaultAddress),
-          abi: ERC4626_POSITION_ABI,
-          functionName: "balanceOf",
-          args: [getAddress(walletAddress)],
-        })
+        const shares = await withRpcRetry(() =>
+          client.readContract({
+            address: getAddress(vaultAddress),
+            abi: ERC4626_POSITION_ABI,
+            functionName: "balanceOf",
+            args: [getAddress(walletAddress)],
+          })
+        )
         const key = vaultAddress.toLowerCase()
         sharesByVault.set(key, (sharesByVault.get(key) ?? BigInt(0)) + shares)
       } catch (error) {
@@ -212,12 +214,14 @@ export async function sumEarnHoldingsOnChain(
     [...sharesByVault.entries()].map(async ([vaultKey, totalShares]) => {
       if (totalShares === BigInt(0)) return
       try {
-        const assets = await client.readContract({
-          address: getAddress(vaultKey),
-          abi: ERC4626_POSITION_ABI,
-          functionName: "convertToAssets",
-          args: [totalShares],
-        })
+        const assets = await withRpcRetry(() =>
+          client.readContract({
+            address: getAddress(vaultKey),
+            abi: ERC4626_POSITION_ABI,
+            functionName: "convertToAssets",
+            args: [totalShares],
+          })
+        )
         if (assets > BigInt(0)) {
           holdings[vaultKey] = {
             balance: formatUnits(assets, USDC_DECIMALS),
