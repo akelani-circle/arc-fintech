@@ -18,6 +18,7 @@
 
 "use client"
 
+import * as React from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -27,10 +28,12 @@ import {
   IconWallet,
   IconExternalLink,
   IconRefresh,
+  IconCreditCard,
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { getExplorerUrl, formatDate } from "@/lib/utils/data-formatters"
+import { OnrampDialog } from "@/components/onramp-dialog"
 
 // Type definitions
 interface WalletDetails {
@@ -46,6 +49,7 @@ interface WalletDetails {
 
 export function WalletDetailsCard({ wallet }: { wallet: WalletDetails }) {
   const router = useRouter()
+  const [onrampOpen, setOnrampOpen] = React.useState(false)
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
@@ -152,7 +156,15 @@ export function WalletDetailsCard({ wallet }: { wallet: WalletDetails }) {
                 <IconRefresh className="h-4 w-4 mr-2" />
                 View All Activity
               </Button>
-              <Button variant="outline" className="w-full justify-start">
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => setOnrampOpen(true)}
+              >
+                <IconCreditCard className="h-4 w-4 mr-2" />
+                Buy Crypto
+              </Button>
+              <Button variant="outline" className="w-full justify-start" disabled>
                 <IconArrowUpRight className="h-4 w-4 mr-2" />
                 Send Funds (comming soon)
               </Button>
@@ -160,6 +172,12 @@ export function WalletDetailsCard({ wallet }: { wallet: WalletDetails }) {
           </div>
         </div>
       </CardContent>
+
+      <OnrampDialog
+        open={onrampOpen}
+        onOpenChange={setOnrampOpen}
+        wallet={{ id: wallet.id, name: wallet.name, address: wallet.address }}
+      />
     </Card>
   )
 }

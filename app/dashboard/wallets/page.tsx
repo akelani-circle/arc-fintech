@@ -28,6 +28,7 @@ import {
   IconArrowUp,
   IconArrowDown,
   IconArrowsSort,
+  IconCreditCard,
 } from "@tabler/icons-react"
 import { format } from "date-fns"
 import { toast } from "sonner"
@@ -47,6 +48,7 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { shortenAddress, getExplorerUrl } from "@/lib/utils/data-formatters"
 import { useBalanceContext } from "@/lib/contexts/balance-context"
+import { OnrampDialog } from "@/components/onramp-dialog"
 
 type Wallet = {
   id: string
@@ -75,6 +77,7 @@ export default function Page() {
   const balances = walletBalances
   const eurcBalances = eurcWalletBalances
   const loading = isLoadingData
+  const [onrampWallet, setOnrampWallet] = React.useState<Wallet | null>(null)
 
   // Filter, Pagination & Sorting State
   const [filter, setFilter] = React.useState("")
@@ -218,6 +221,7 @@ export default function Page() {
                   {sortIcon("created_at")}
                 </Button>
               </TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -231,6 +235,7 @@ export default function Page() {
                   <TableCell className="text-right"><Skeleton className="h-5 w-16 ml-auto" /></TableCell>
                   <TableCell className="text-right"><Skeleton className="h-5 w-16 ml-auto" /></TableCell>
                   <TableCell className="text-right"><Skeleton className="h-5 w-24 ml-auto" /></TableCell>
+                  <TableCell className="text-right"><Skeleton className="h-5 w-16 ml-auto" /></TableCell>
                 </TableRow>
               ))
             ) : paginatedWallets.length === 0 ? (
@@ -333,6 +338,19 @@ export default function Page() {
                     <TableCell className="text-right text-muted-foreground">
                       {format(new Date(wallet.created_at), "MMM d, yyyy")}
                     </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setOnrampWallet(wallet)
+                        }}
+                      >
+                        <IconCreditCard className="h-4 w-4 mr-1" />
+                        Buy
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 )
               })
@@ -369,6 +387,14 @@ export default function Page() {
           </div>
         </div>
       )}
+
+      <OnrampDialog
+        open={onrampWallet !== null}
+        onOpenChange={(open) => {
+          if (!open) setOnrampWallet(null)
+        }}
+        wallet={onrampWallet ? { id: onrampWallet.id, name: onrampWallet.name, address: onrampWallet.address } : { id: "", name: "", address: "" }}
+      />
     </div>
   )
 }

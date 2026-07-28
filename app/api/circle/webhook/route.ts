@@ -19,6 +19,7 @@
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { ONRAMP_CHAIN_TO_DB_BLOCKCHAIN } from "@/lib/circle/onramp-chains";
 
 // Fail fast at module load if the webhook's required env vars aren't
 // configured. This is a secret-key + public-URL pair: missing either
@@ -107,6 +108,22 @@ type GatewayDepositNotification = {
   to?: string;
   txHash?: string;
   tokenAddress?: string;
+};
+
+// Shape of the `notification` object on an `onramp.deposit.settled` event.
+// Inferred from the onramp kit's client-side DEPOSIT_SETTLED envelope (amount,
+// tokenSymbol, transactionHash, etc.) — Circle's server-side onramp webhook
+// contract wasn't available to confirm this against directly. Verify against
+// a real webhook delivery once a kit key is available and adjust if the
+// shape differs.
+type OnrampDepositNotification = {
+  sessionId: string;
+  userId?: string;
+  destinationAddress: string;
+  destinationChain?: string;
+  amount: string | number;
+  tokenSymbol?: string;
+  transactionHash?: string;
 };
 
 async function verifyCircleSignature(
@@ -407,6 +424,59 @@ async function applyGatewayDeposit(
   }
 }
 
+/**
+ * Apply an `onramp.deposit.settled` event: a customer completed a fiat->USDC
+ * purchase inside Circle's hosted onramp widget and the deposit has settled
+ * on-chain.
+ *
+ * Unlike the gateway/wallet flows above, the app never wrote a row for this
+ * transaction ahead of time — the purchase happened entirely inside Circle's
+ * widget, so this webhook is the first (and authoritative) the app hears
+ * about it. The onramp kit's client-side DEPOSIT_SETTLED event is a UI hint
+ * only. Idempotent on `onramp_session_id` (in addition to the general
+ * `webhook_events` dedupe above) since a session should only ever produce
+ * one deposit.
+ */
+async function applyOnrampDeposit(
+  notification: OnrampDepositNotification
+): Promise<void> {
+  if (!notification.userId || !notification.destinationAddress || !notification.sessionId) {
+    console.error("Onramp webhook missing required fields:", notification);
+    return;
+  }
+
+  const { data: existing, error: existingErr } = await supabaseAdmin
+    .from("transactions")
+    .select("id")
+    .eq("onramp_session_id", notification.sessionId)
+    .maybeSingle();
+
+  if (existingErr) {
+    console.error("Onramp deposit lookup error:", existingErr);
+    return;
+  }
+  if (existing) return;
+
+  const blockchain = notification.destinationChain
+    ? ONRAMP_CHAIN_TO_DB_BLOCKCHAIN[notification.destinationChain] ?? "ETH-SEPOLIA"
+    : "ETH-SEPOLIA";
+
+  const { error: insertErr } = await supabaseAdmin.from("transactions").insert({
+    user_id: notification.userId,
+    amount: notification.amount,
+    sender_address: "fiat-onramp",
+    recipient_address: notification.destinationAddress,
+    blockchain,
+    type: "ONRAMP",
+    tx_hash: notification.transactionHash ?? null,
+    onramp_session_id: notification.sessionId,
+  });
+
+  if (insertErr) {
+    console.error("Failed to record onramp deposit:", insertErr);
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const signature = req.headers.get("x-circle-signature");
@@ -483,6 +553,8 @@ export async function POST(req: NextRequest) {
       await applyGatewayDeposit(
         notification as unknown as GatewayDepositNotification
       );
+    } else if (notificationType === "onramp.deposit.settled") {
+      await applyOnrampDeposit(notification as unknown as OnrampDepositNotification);
     }
 
     return NextResponse.json({ received: true }, { status: 200 });
