@@ -260,13 +260,13 @@ export function AddFundsDialog({ wallet, trigger, defaultMethod = "gateway" }: A
         {trigger ?? (
           <Button variant="outline">
             <IconPlus className="size-4" />
-            Fund
+            Funding
           </Button>
         )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Fund</DialogTitle>
+          <DialogTitle>Funding</DialogTitle>
           <DialogDescription>
             {method === "gateway"
               ? "Deposit USDC into your balance via Circle Gateway."
