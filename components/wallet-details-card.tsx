@@ -28,12 +28,11 @@ import {
   IconWallet,
   IconExternalLink,
   IconRefresh,
-  IconCreditCard,
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { getExplorerUrl, formatDate } from "@/lib/utils/data-formatters"
-import { OnrampDialog } from "@/components/onramp-dialog"
+import { AddFundsDialog } from "@/components/add-funds-dialog"
 
 // Type definitions
 interface WalletDetails {
@@ -49,7 +48,6 @@ interface WalletDetails {
 
 export function WalletDetailsCard({ wallet }: { wallet: WalletDetails }) {
   const router = useRouter()
-  const [onrampOpen, setOnrampOpen] = React.useState(false)
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
@@ -156,14 +154,16 @@ export function WalletDetailsCard({ wallet }: { wallet: WalletDetails }) {
                 <IconRefresh className="h-4 w-4 mr-2" />
                 View All Activity
               </Button>
-              <Button
-                variant="outline"
-                className="w-full justify-start"
-                onClick={() => setOnrampOpen(true)}
-              >
-                <IconCreditCard className="h-4 w-4 mr-2" />
-                Buy Crypto
-              </Button>
+              <AddFundsDialog
+                wallet={{ id: wallet.id, address: wallet.address, blockchain: wallet.blockchain, name: wallet.name }}
+                defaultMethod="onramp"
+                trigger={
+                  <Button variant="outline" className="w-full justify-start">
+                    <IconWallet className="h-4 w-4 mr-2" />
+                    Fund
+                  </Button>
+                }
+              />
               <Button variant="outline" className="w-full justify-start" disabled>
                 <IconArrowUpRight className="h-4 w-4 mr-2" />
                 Send Funds (comming soon)
@@ -172,12 +172,6 @@ export function WalletDetailsCard({ wallet }: { wallet: WalletDetails }) {
           </div>
         </div>
       </CardContent>
-
-      <OnrampDialog
-        open={onrampOpen}
-        onOpenChange={setOnrampOpen}
-        wallet={{ id: wallet.id, name: wallet.name, address: wallet.address }}
-      />
     </Card>
   )
 }

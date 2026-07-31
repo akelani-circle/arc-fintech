@@ -229,7 +229,7 @@ export default function Page() {
         <RebalanceButton />
         <AddFundsDialog />
         <Button variant="outline" onClick={() => setCreateWalletOpen(true)}>
-          <IconWallet className="mr-2 size-4" />
+          <IconWallet className="size-4" />
           New wallet
         </Button>
       </div>
