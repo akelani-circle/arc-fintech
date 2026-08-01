@@ -46,26 +46,16 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { WalletSelect, type WalletOption } from "@/components/wallet-select"
 
-type FundingMethod = "gateway" | "onramp"
-
-// Form Schema Validation. Amount is required for Gateway (an on-chain
-// transfer amount) but only an optional pre-fill for Onramp (the widget lets
-// the user adjust it), so it's validated conditionally based on method.
-const fundFormSchema = z.object({
+const addFundsFormSchema = z.object({
   walletAddress: z.string({
     error: "Please select a wallet.",
   }).min(1, "Please select a wallet"),
   amount: z.string(),
-  method: z.enum(["gateway", "onramp"]),
-}).refine(
-  (data) => data.method === "onramp" || (!isNaN(Number(data.amount)) && Number(data.amount) > 0),
-  { message: "Amount must be a positive number.", path: ["amount"] }
-)
+})
 
-type FundFormValues = z.infer<typeof fundFormSchema>
+type AddFundsFormValues = z.infer<typeof addFundsFormSchema>
 
 async function mintOnrampSession(walletId: string, amount?: string): Promise<OnrampSession> {
   const res = await fetch("/api/onramp/session", {
@@ -83,17 +73,14 @@ async function mintOnrampSession(walletId: string, amount?: string): Promise<Onr
 }
 
 interface AddFundsDialogProps {
-  /** Preselected wallet, e.g. when launched from a specific wallet's row/card. */
+  /** Preselected destination wallet, e.g. when launched from a specific wallet's row/card. */
   wallet?: { id: string; address: string; blockchain: string; name: string }
-  /** Custom trigger element. Defaults to the standalone outline "Fund" button. */
+  /** Custom trigger element. Defaults to the standalone outline "Add Funds" button. */
   trigger?: React.ReactNode
-  /** Which funding method the dialog opens on. Defaults to "gateway". */
-  defaultMethod?: FundingMethod
 }
 
-export function AddFundsDialog({ wallet, trigger, defaultMethod = "gateway" }: AddFundsDialogProps) {
+export function AddFundsDialog({ wallet, trigger }: AddFundsDialogProps) {
   const [open, setOpen] = React.useState(false)
-  const [method, setMethod] = React.useState<FundingMethod>(defaultMethod)
   const [selectedWallet, setSelectedWallet] = React.useState<WalletOption | null>(null)
 
   // Onramp session, pre-minted ahead of the click so `openWindow()` can be
@@ -106,8 +93,8 @@ export function AddFundsDialog({ wallet, trigger, defaultMethod = "gateway" }: A
   const [mintErrorWalletId, setMintErrorWalletId] = React.useState<string | null>(null)
 
   const session = mintedSession && mintedSession.walletId === selectedWallet?.id ? mintedSession.session : null
-  const onrampStatus: "idle" | "loading" | "ready" | "error" =
-    method !== "onramp" || !selectedWallet
+  const status: "idle" | "loading" | "ready" | "error" =
+    !selectedWallet
       ? "idle"
       : session
         ? "ready"
@@ -115,19 +102,15 @@ export function AddFundsDialog({ wallet, trigger, defaultMethod = "gateway" }: A
           ? "error"
           : "loading"
 
-  const form = useForm<FundFormValues>({
-    resolver: zodResolver(fundFormSchema),
+  const form = useForm<AddFundsFormValues>({
+    resolver: zodResolver(addFundsFormSchema),
     defaultValues: {
       walletAddress: wallet ? `${wallet.address}-${wallet.blockchain}` : "",
       amount: "",
-      method: defaultMethod,
     },
   })
 
   const walletAddress = useWatch({ control: form.control, name: "walletAddress" })
-  const amount = useWatch({ control: form.control, name: "amount" })
-
-  const { isSubmitting } = form.formState
 
   // Dialog open/close is a user-driven event, not something to synchronize
   // via an effect, so the reset lives in the onOpenChange handler itself.
@@ -135,11 +118,9 @@ export function AddFundsDialog({ wallet, trigger, defaultMethod = "gateway" }: A
     setOpen(next)
     if (!next) return
 
-    setMethod(defaultMethod)
     form.reset({
       walletAddress: wallet ? `${wallet.address}-${wallet.blockchain}` : "",
       amount: "",
-      method: defaultMethod,
     })
     setSelectedWallet(
       wallet ? { id: wallet.id, address: wallet.address, blockchain: wallet.blockchain, name: wallet.name, circle_wallet_id: "" } : null
@@ -148,17 +129,11 @@ export function AddFundsDialog({ wallet, trigger, defaultMethod = "gateway" }: A
     setMintErrorWalletId(null)
   }
 
-  const handleMethodChange = (value: string) => {
-    if (!value) return
-    setMethod(value as FundingMethod)
-    form.setValue("method", value as FundingMethod)
-  }
-
-  // Mint (or re-mint) an onramp session whenever we're in onramp mode with a
+  // Mint (or re-mint) an onramp session whenever the dialog is open with a
   // wallet selected. Sessions are single-use and tied to one wallet, so a
-  // wallet or method change needs a fresh one before the buy button is usable.
+  // wallet change needs a fresh one before the buy button is usable.
   React.useEffect(() => {
-    if (!open || method !== "onramp" || !selectedWallet?.id) return
+    if (!open || !selectedWallet?.id) return
 
     let cancelled = false
     const walletId = selectedWallet.id
@@ -175,40 +150,7 @@ export function AddFundsDialog({ wallet, trigger, defaultMethod = "gateway" }: A
     return () => {
       cancelled = true
     }
-  }, [open, method, selectedWallet?.id])
-
-  const onSubmit = async (values: FundFormValues) => {
-    if (!selectedWallet) return
-
-    try {
-      const response = await fetch("/api/gateway/deposit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          walletAddress: selectedWallet.address,
-          blockchain: selectedWallet.blockchain,
-          amount: values.amount,
-        }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to deposit funds")
-      }
-
-      toast.success("Deposit initiated successfully", {
-        description: `Transaction Hash: ${data.txHash?.slice(0, 10)}...`,
-      })
-
-      setOpen(false)
-    } catch (error) {
-      console.error(error)
-      toast.error("Deposit failed", {
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-      })
-    }
-  }
+  }, [open, selectedWallet?.id])
 
   const handleOpenWidget = () => {
     if (!session || !selectedWallet) return
@@ -260,41 +202,20 @@ export function AddFundsDialog({ wallet, trigger, defaultMethod = "gateway" }: A
         {trigger ?? (
           <Button variant="outline">
             <IconPlus className="size-4" />
-            Funding
+            Add Funds
           </Button>
         )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Funding</DialogTitle>
+          <DialogTitle>Add Funds</DialogTitle>
           <DialogDescription>
-            {method === "gateway"
-              ? "Deposit USDC into your balance via Circle Gateway."
-              : "Buy crypto with fiat and settle it directly to a wallet."}
+            Buy crypto with fiat and settle it directly to a wallet.
           </DialogDescription>
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-4 py-4 pb-0">
-
-            <div className="grid gap-2">
-              <FormLabel>Funding method</FormLabel>
-              <ToggleGroup
-                type="single"
-                variant="outline"
-                value={method}
-                onValueChange={handleMethodChange}
-                disabled={isSubmitting}
-                className="w-full"
-              >
-                <ToggleGroupItem value="gateway" className="flex-1">
-                  Gateway
-                </ToggleGroupItem>
-                <ToggleGroupItem value="onramp" className="flex-1">
-                  Onramp
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </div>
+          <div className="grid gap-4 py-4 pb-0">
 
             {/* Reusable Wallet Selection Component */}
             <FormField
@@ -302,7 +223,7 @@ export function AddFundsDialog({ wallet, trigger, defaultMethod = "gateway" }: A
               name="walletAddress"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{method === "gateway" ? "Source Wallet" : "Destination Wallet"}</FormLabel>
+                  <FormLabel>Destination Wallet</FormLabel>
                   <FormControl>
                     <WalletSelect
                       value={field.value}
@@ -311,9 +232,7 @@ export function AddFundsDialog({ wallet, trigger, defaultMethod = "gateway" }: A
                         field.onChange(`${w.address}-${w.blockchain}`)
                         setSelectedWallet(w)
                       }}
-                      disabled={isSubmitting}
                       excludeGatewaySigner
-                      minBalance={method === "gateway" ? 0 : undefined}
                     />
                   </FormControl>
                   <FormMessage />
@@ -327,15 +246,12 @@ export function AddFundsDialog({ wallet, trigger, defaultMethod = "gateway" }: A
               name="amount"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>
-                    Amount (USDC){method === "onramp" && " (optional)"}
-                  </FormLabel>
+                  <FormLabel>Amount (USDC) (optional)</FormLabel>
                   <FormControl>
                     <Input
                       type="number"
                       step="0.01"
                       placeholder="100.00"
-                      disabled={isSubmitting}
                       {...field}
                     />
                   </FormControl>
@@ -346,34 +262,24 @@ export function AddFundsDialog({ wallet, trigger, defaultMethod = "gateway" }: A
 
             <DialogFooter>
               <DialogClose asChild>
-                <Button variant="outline" type="button" disabled={isSubmitting}>
+                <Button variant="outline" type="button">
                   Cancel
                 </Button>
               </DialogClose>
-              {method === "gateway" ? (
-                <Button
-                  type="submit"
-                  disabled={isSubmitting || !walletAddress || !amount}
-                >
-                  {isSubmitting && <IconLoader className="size-4 animate-spin" />}
-                  Confirm Deposit
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  onClick={handleOpenWidget}
-                  disabled={!walletAddress || onrampStatus !== "ready"}
-                >
-                  {onrampStatus === "loading" ? (
-                    <IconLoader className="size-4 animate-spin" />
-                  ) : (
-                    <IconCreditCard className="size-4" />
-                  )}
-                  Buy Crypto
-                </Button>
-              )}
+              <Button
+                type="button"
+                onClick={handleOpenWidget}
+                disabled={!walletAddress || status !== "ready"}
+              >
+                {status === "loading" ? (
+                  <IconLoader className="size-4 animate-spin" />
+                ) : (
+                  <IconCreditCard className="size-4" />
+                )}
+                Buy Crypto
+              </Button>
             </DialogFooter>
-          </form>
+          </div>
         </Form>
       </DialogContent>
     </Dialog>

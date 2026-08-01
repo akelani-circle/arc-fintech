@@ -156,11 +156,10 @@ export function WalletDetailsCard({ wallet }: { wallet: WalletDetails }) {
               </Button>
               <AddFundsDialog
                 wallet={{ id: wallet.id, address: wallet.address, blockchain: wallet.blockchain, name: wallet.name }}
-                defaultMethod="onramp"
                 trigger={
                   <Button variant="outline" className="w-full justify-start">
                     <IconWallet className="h-4 w-4 mr-2" />
-                    Fund
+                    Add Funds
                   </Button>
                 }
               />

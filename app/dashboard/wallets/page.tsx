@@ -340,11 +340,10 @@ export default function Page() {
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <AddFundsDialog
                         wallet={{ id: wallet.id, address: wallet.address, blockchain: wallet.blockchain, name: wallet.name }}
-                        defaultMethod="onramp"
                         trigger={
                           <Button variant="outline" size="sm">
-                            <IconPlus className="h-4 w-4 mr-1" />
-                            Fund
+                            <IconPlus className="size-4" />
+                            Add Funds
                           </Button>
                         }
                       />
