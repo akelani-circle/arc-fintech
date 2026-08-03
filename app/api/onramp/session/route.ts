@@ -21,13 +21,13 @@ import { DB_BLOCKCHAIN_TO_ONRAMP_CHAIN } from "@/lib/circle/onramp-chains";
 
 // Constructed lazily (not at module scope): createOnrampServerKit validates
 // kitKey eagerly and throws if it's missing, which would otherwise break
-// Next's build-time page-data collection whenever ONRAMP_KIT_KEY isn't set.
+// Next's build-time page-data collection whenever KIT_KEY isn't set.
 let server: OnrampServerKit | undefined;
 
 function getServer(): OnrampServerKit {
   if (!server) {
     server = createOnrampServerKit({
-      kitKey: process.env.ONRAMP_KIT_KEY!,
+      kitKey: process.env.KIT_KEY!,
       // Omit both URLs for production. Set both to point at staging:
       baseUrl: process.env.ONRAMP_API_BASE_URL,
       widgetBaseUrl: process.env.NEXT_PUBLIC_ONRAMP_WIDGET_BASE_URL,
