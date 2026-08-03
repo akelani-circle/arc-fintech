@@ -76,5 +76,10 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5",
     "vitest": "^4.1.5"
+  },
+  "overrides": {
+    "@circle-fin/developer-controlled-wallets": {
+      "@solana/codecs-strings": "^5.0.0"
+    }
   }
 }
