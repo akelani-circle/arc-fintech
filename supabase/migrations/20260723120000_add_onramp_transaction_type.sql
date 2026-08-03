@@ -21,4 +21,11 @@ ALTER TYPE public.transaction_type ADD VALUE IF NOT EXISTS 'ONRAMP';
 ALTER TABLE public.transactions
 ADD COLUMN IF NOT EXISTS onramp_session_id text;
 
-CREATE INDEX IF NOT EXISTS transactions_onramp_session_id_idx ON public.transactions(onramp_session_id);
+-- Unique, not just indexed: an onramp session settles exactly once, so this is
+-- the database-level guarantee behind the webhook handler's lookup-then-insert
+-- (which on its own can double-insert if two notifications for one session are
+-- delivered concurrently). Partial, since every non-onramp row is NULL here.
+DROP INDEX IF EXISTS transactions_onramp_session_id_idx;
+CREATE UNIQUE INDEX IF NOT EXISTS transactions_onramp_session_id_key
+  ON public.transactions(onramp_session_id)
+  WHERE onramp_session_id IS NOT NULL;

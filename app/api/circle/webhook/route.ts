@@ -19,7 +19,10 @@
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { ONRAMP_CHAIN_TO_DB_BLOCKCHAIN } from "@/lib/circle/onramp-chains";
+import {
+  buildOnrampTransactionRow,
+  type OnrampDepositNotification,
+} from "@/lib/circle/onramp-deposit";
 
 // Fail fast at module load if the webhook's required env vars aren't
 // configured. This is a secret-key + public-URL pair: missing either
@@ -108,22 +111,6 @@ type GatewayDepositNotification = {
   to?: string;
   txHash?: string;
   tokenAddress?: string;
-};
-
-// Shape of the `notification` object on an `onramp.deposit.settled` event.
-// Inferred from the onramp kit's client-side DEPOSIT_SETTLED envelope (amount,
-// tokenSymbol, transactionHash, etc.) — Circle's server-side onramp webhook
-// contract wasn't available to confirm this against directly. Verify against
-// a real webhook delivery once a kit key is available and adjust if the
-// shape differs.
-type OnrampDepositNotification = {
-  sessionId: string;
-  userId?: string;
-  destinationAddress: string;
-  destinationChain?: string;
-  amount: string | number;
-  tokenSymbol?: string;
-  transactionHash?: string;
 };
 
 async function verifyCircleSignature(
@@ -440,40 +427,38 @@ async function applyGatewayDeposit(
 async function applyOnrampDeposit(
   notification: OnrampDepositNotification
 ): Promise<void> {
-  if (!notification.userId || !notification.destinationAddress || !notification.sessionId) {
-    console.error("Onramp webhook missing required fields:", notification);
+  const built = buildOnrampTransactionRow(notification);
+  if (!built.ok) {
+    // Unmappable payloads are permanent failures — a retry delivers the same
+    // bytes — so these are logged and swallowed rather than thrown.
+    console.error(
+      `Rejected onramp deposit (${built.reason}):`,
+      notification
+    );
     return;
   }
 
   const { data: existing, error: existingErr } = await supabaseAdmin
     .from("transactions")
     .select("id")
-    .eq("onramp_session_id", notification.sessionId)
+    .eq("onramp_session_id", built.row.onramp_session_id)
     .maybeSingle();
 
+  // Transient: throwing releases the dedupe row so Circle's retry can land.
   if (existingErr) {
-    console.error("Onramp deposit lookup error:", existingErr);
-    return;
+    throw new Error(`Onramp deposit lookup failed: ${existingErr.message}`);
   }
   if (existing) return;
 
-  const blockchain = notification.destinationChain
-    ? ONRAMP_CHAIN_TO_DB_BLOCKCHAIN[notification.destinationChain] ?? "ETH-SEPOLIA"
-    : "ETH-SEPOLIA";
-
-  const { error: insertErr } = await supabaseAdmin.from("transactions").insert({
-    user_id: notification.userId,
-    amount: notification.amount,
-    sender_address: "fiat-onramp",
-    recipient_address: notification.destinationAddress,
-    blockchain,
-    type: "ONRAMP",
-    tx_hash: notification.transactionHash ?? null,
-    onramp_session_id: notification.sessionId,
-  });
+  const { error: insertErr } = await supabaseAdmin
+    .from("transactions")
+    .insert(built.row);
 
   if (insertErr) {
-    console.error("Failed to record onramp deposit:", insertErr);
+    // 23505: the partial unique index on onramp_session_id fired, meaning a
+    // concurrent delivery for this session won the race. Already recorded.
+    if ((insertErr as { code?: string }).code === "23505") return;
+    throw new Error(`Failed to record onramp deposit: ${insertErr.message}`);
   }
 }
 
@@ -554,7 +539,37 @@ export async function POST(req: NextRequest) {
         notification as unknown as GatewayDepositNotification
       );
     } else if (notificationType === "onramp.deposit.settled") {
-      await applyOnrampDeposit(notification as unknown as OnrampDepositNotification);
+      try {
+        await applyOnrampDeposit(
+          notification as unknown as OnrampDepositNotification
+        );
+      } catch (applyErr) {
+        // The dedupe row was written *before* the side effects ran, so leaving
+        // it in place makes Circle's retries ack as duplicates and drop the
+        // event for good. The handlers above can survive that — their rows
+        // already exist and get reconciled later — but an onramp deposit has no
+        // other record anywhere, so losing it means money arrived and the app
+        // never knows. Release the dedupe row and 500 so the retry gets a real
+        // second attempt.
+        console.error("Failed to apply onramp deposit:", applyErr);
+
+        const { error: releaseErr } = await supabaseAdmin
+          .from("webhook_events")
+          .delete()
+          .eq("notification_id", notification.id);
+
+        if (releaseErr) {
+          console.error(
+            "Failed to release webhook dedupe row; this deposit will not be retried:",
+            releaseErr
+          );
+        }
+
+        return NextResponse.json(
+          { error: "Failed to apply onramp deposit" },
+          { status: 500 }
+        );
+      }
     }
 
     return NextResponse.json({ received: true }, { status: 200 });

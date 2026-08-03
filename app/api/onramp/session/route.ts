@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => null);
-    const { walletId, ...sessionParams } = body ?? {};
+    const { walletId } = body ?? {};
 
     if (typeof walletId !== "string" || !walletId) {
       return NextResponse.json(
@@ -76,17 +76,35 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // `destinationChain` is optional to the kit, but omitting it makes
+    // wallets-api fall back to Ethereum *mainnet* — real fiat settling on a
+    // chain this app never reads. Refuse to mint rather than guess.
+    const destinationChain = DB_BLOCKCHAIN_TO_ONRAMP_CHAIN[wallet.blockchain];
+    if (!destinationChain) {
+      console.error(
+        `No onramp chain mapping for blockchain "${wallet.blockchain}"`
+      );
+      return NextResponse.json(
+        { error: `Onramp is not available for ${wallet.blockchain}` },
+        { status: 400 }
+      );
+    }
+
+    // Every session parameter is derived server-side; nothing from the request
+    // body is forwarded. The kit's schema also accepts `referrerDomain`, which
+    // is sealed into the session JWT and handed to the widget host as a
+    // `frame-ancestors` CSP claim — a client-supplied value there would let a
+    // caller widen that allowlist to a domain of their choosing.
     const session = await getServer().createSession({
-      ...sessionParams,
       userId: user.id, // never trust a client-supplied userId
       destinationAddress: wallet.address,
-      destinationChain: DB_BLOCKCHAIN_TO_ONRAMP_CHAIN[wallet.blockchain],
+      destinationChain,
     });
 
     return NextResponse.json(session, {
       headers: { "Cache-Control": "no-store" },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error minting onramp session:", error);
 
     const statusByType: Record<string, number> = {
@@ -97,9 +115,16 @@ export async function POST(req: NextRequest) {
       RPC: 502,
     };
 
+    // KitError carries a `type` discriminator; anything else is a 500.
+    const kitType =
+      typeof error === "object" && error !== null && "type" in error
+        ? String((error as { type: unknown }).type)
+        : undefined;
+    const message = error instanceof Error ? error.message : undefined;
+
     return NextResponse.json(
-      { error: error?.message || "Internal server error" },
-      { status: statusByType[error?.type] ?? 500 }
+      { error: message || "Internal server error" },
+      { status: (kitType ? statusByType[kitType] : undefined) ?? 500 }
     );
   }
 }

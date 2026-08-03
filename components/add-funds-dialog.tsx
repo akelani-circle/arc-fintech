@@ -45,23 +45,21 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
-import { Input } from "@/components/ui/input"
 import { WalletSelect, type WalletOption } from "@/components/wallet-select"
 
 const addFundsFormSchema = z.object({
   walletAddress: z.string({
     error: "Please select a wallet.",
   }).min(1, "Please select a wallet"),
-  amount: z.string(),
 })
 
 type AddFundsFormValues = z.infer<typeof addFundsFormSchema>
 
-async function mintOnrampSession(walletId: string, amount?: string): Promise<OnrampSession> {
+async function mintOnrampSession(walletId: string): Promise<OnrampSession> {
   const res = await fetch("/api/onramp/session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ walletId, ...(amount ? { amount } : {}) }),
+    body: JSON.stringify({ walletId }),
   })
 
   if (!res.ok) {
@@ -92,6 +90,15 @@ export function AddFundsDialog({ wallet, trigger }: AddFundsDialogProps) {
   const [mintedSession, setMintedSession] = React.useState<{ walletId: string; session: OnrampSession } | null>(null)
   const [mintErrorWalletId, setMintErrorWalletId] = React.useState<string | null>(null)
 
+  const form = useForm<AddFundsFormValues>({
+    resolver: zodResolver(addFundsFormSchema),
+    defaultValues: {
+      walletAddress: wallet ? `${wallet.address}-${wallet.blockchain}` : "",
+    },
+  })
+
+  const walletAddress = useWatch({ control: form.control, name: "walletAddress" })
+
   const session = mintedSession && mintedSession.walletId === selectedWallet?.id ? mintedSession.session : null
   const status: "idle" | "loading" | "ready" | "error" =
     !selectedWallet
@@ -102,16 +109,6 @@ export function AddFundsDialog({ wallet, trigger }: AddFundsDialogProps) {
           ? "error"
           : "loading"
 
-  const form = useForm<AddFundsFormValues>({
-    resolver: zodResolver(addFundsFormSchema),
-    defaultValues: {
-      walletAddress: wallet ? `${wallet.address}-${wallet.blockchain}` : "",
-      amount: "",
-    },
-  })
-
-  const walletAddress = useWatch({ control: form.control, name: "walletAddress" })
-
   // Dialog open/close is a user-driven event, not something to synchronize
   // via an effect, so the reset lives in the onOpenChange handler itself.
   const handleOpenChange = (next: boolean) => {
@@ -120,7 +117,6 @@ export function AddFundsDialog({ wallet, trigger }: AddFundsDialogProps) {
 
     form.reset({
       walletAddress: wallet ? `${wallet.address}-${wallet.blockchain}` : "",
-      amount: "",
     })
     setSelectedWallet(
       wallet ? { id: wallet.id, address: wallet.address, blockchain: wallet.blockchain, name: wallet.name, circle_wallet_id: "" } : null
@@ -233,26 +229,6 @@ export function AddFundsDialog({ wallet, trigger }: AddFundsDialogProps) {
                         setSelectedWallet(w)
                       }}
                       excludeGatewaySigner
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {/* Amount Input */}
-            <FormField
-              control={form.control}
-              name="amount"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Amount (USDC) (optional)</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="100.00"
-                      {...field}
                     />
                   </FormControl>
                   <FormMessage />
