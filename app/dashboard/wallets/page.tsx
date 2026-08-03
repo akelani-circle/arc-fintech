@@ -250,9 +250,14 @@ export default function Page() {
                 // API returns "$100.00 (CHAIN)" or "$0.00"
                 const displayBalance = balanceString ? balanceString.split(' (')[0] : null
                 const eurcBalanceString = eurcBalances[wallet.circle_wallet_id]
-                const displayEurcBalance = eurcBalanceString
-                  ? eurcBalanceString.split(' (')[0]
-                  : null
+                // Only `undefined` means "not fetched yet". The balance API
+                // deliberately returns an empty string for Gateway signer
+                // wallets, which custody USDC on-chain and never hold EURC —
+                // treating that as unloaded left the cell spinning forever.
+                const displayEurcBalance =
+                  eurcBalanceString === undefined
+                    ? null
+                    : eurcBalanceString.split(' (')[0] || "—"
 
                 return (
                   <TableRow
