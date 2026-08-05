@@ -18,11 +18,12 @@
 
 "use client"
 
-import { useState } from "react"
+import * as React from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { IconLoader, IconPlus } from "@tabler/icons-react"
+import { IconCreditCard, IconLoader, IconPlus } from "@tabler/icons-react"
 import { useForm, useWatch } from "react-hook-form"
 import { toast } from "sonner"
+import { createOnrampKit, parseOnrampSession, type OnrampSession } from "@crcl-main/onramp-kit"
 import * as z from "zod"
 
 import { Button } from "@/components/ui/button"
@@ -44,96 +45,173 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
-import { Input } from "@/components/ui/input"
-import { WalletSelect } from "@/components/wallet-select"
+import { WalletSelect, type WalletOption } from "@/components/wallet-select"
 
-// Form Schema Validation
-const depositFormSchema = z.object({
+const addFundsFormSchema = z.object({
   walletAddress: z.string({
     error: "Please select a wallet.",
   }).min(1, "Please select a wallet"),
-  amount: z.string().refine(
-    (val) => !isNaN(Number(val)) && Number(val) > 0,
-    { message: "Amount must be a positive number." }
-  ),
 })
 
-type DepositFormValues = z.infer<typeof depositFormSchema>
+type AddFundsFormValues = z.infer<typeof addFundsFormSchema>
 
-export function AddFundsDialog() {
-  const [open, setOpen] = useState(false)
-  const [selectedWalletAddress, setSelectedWalletAddress] = useState("")
-  const [selectedBlockchain, setSelectedBlockchain] = useState("")
+async function mintOnrampSession(walletId: string): Promise<OnrampSession> {
+  const res = await fetch("/api/onramp/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ walletId }),
+  })
 
-  const form = useForm<DepositFormValues>({
-    resolver: zodResolver(depositFormSchema),
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || `Failed to start onramp session (${res.status})`)
+  }
+
+  return parseOnrampSession(await res.json())
+}
+
+interface AddFundsDialogProps {
+  /** Preselected destination wallet, e.g. when launched from a specific wallet's row/card. */
+  wallet?: { id: string; address: string; blockchain: string; name: string }
+  /** Custom trigger element. Defaults to the standalone outline "Add Funds" button. */
+  trigger?: React.ReactNode
+}
+
+export function AddFundsDialog({ wallet, trigger }: AddFundsDialogProps) {
+  const [open, setOpen] = React.useState(false)
+  const [selectedWallet, setSelectedWallet] = React.useState<WalletOption | null>(null)
+
+  // Onramp session, pre-minted ahead of the click so `openWindow()` can be
+  // called synchronously inside the button's click handler — any `await`
+  // before it makes the browser drop the user-gesture association and block
+  // the popup. Paired with the wallet id it was minted for (rather than
+  // reset directly in the effect below) so switching wallets can't leave a
+  // stale, mismatched session looking "ready".
+  const [mintedSession, setMintedSession] = React.useState<{ walletId: string; session: OnrampSession } | null>(null)
+  const [mintErrorWalletId, setMintErrorWalletId] = React.useState<string | null>(null)
+
+  const form = useForm<AddFundsFormValues>({
+    resolver: zodResolver(addFundsFormSchema),
     defaultValues: {
-      walletAddress: "",
-      amount: "",
+      walletAddress: wallet ? `${wallet.address}-${wallet.blockchain}` : "",
     },
   })
 
-  // Watch fields to disable button if empty
   const walletAddress = useWatch({ control: form.control, name: "walletAddress" })
-  const amount = useWatch({ control: form.control, name: "amount" })
 
-  const { isSubmitting } = form.formState
+  const session = mintedSession && mintedSession.walletId === selectedWallet?.id ? mintedSession.session : null
+  const status: "idle" | "loading" | "ready" | "error" =
+    !selectedWallet
+      ? "idle"
+      : session
+        ? "ready"
+        : mintErrorWalletId === selectedWallet.id
+          ? "error"
+          : "loading"
 
-  const onSubmit = async (values: DepositFormValues) => {
-    try {
-      // Extract the blockchain from the composite value if not already stored
-      const actualAddress = selectedWalletAddress || values.walletAddress.split('-').slice(0, -2).join('-')
-      const actualBlockchain = selectedBlockchain || values.walletAddress.split('-').slice(-2).join('-')
-      
-      const response = await fetch("/api/gateway/deposit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          walletAddress: actualAddress,
-          blockchain: actualBlockchain,
-          amount: values.amount,
-        }),
+  // Dialog open/close is a user-driven event, not something to synchronize
+  // via an effect, so the reset lives in the onOpenChange handler itself.
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (!next) return
+
+    form.reset({
+      walletAddress: wallet ? `${wallet.address}-${wallet.blockchain}` : "",
+    })
+    setSelectedWallet(
+      wallet ? { id: wallet.id, address: wallet.address, blockchain: wallet.blockchain, name: wallet.name, circle_wallet_id: "" } : null
+    )
+    setMintedSession(null)
+    setMintErrorWalletId(null)
+  }
+
+  // Mint (or re-mint) an onramp session whenever the dialog is open with a
+  // wallet selected. Sessions are single-use and tied to one wallet, so a
+  // wallet change needs a fresh one before the buy button is usable.
+  React.useEffect(() => {
+    if (!open || !selectedWallet?.id) return
+
+    let cancelled = false
+    const walletId = selectedWallet.id
+
+    mintOnrampSession(walletId)
+      .then((minted) => {
+        if (!cancelled) setMintedSession({ walletId, session: minted })
+      })
+      .catch((error) => {
+        console.error("Failed to start onramp session:", error)
+        if (!cancelled) setMintErrorWalletId(walletId)
       })
 
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to deposit funds")
-      }
-
-      toast.success("Deposit initiated successfully", {
-        description: `Transaction Hash: ${data.txHash?.slice(0, 10)}...`,
-      })
-
-      setOpen(false)
-      form.reset()
-
-    } catch (error) {
-      console.error(error)
-      toast.error("Deposit failed", {
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-      })
+    return () => {
+      cancelled = true
     }
+  }, [open, selectedWallet?.id])
+
+  const handleOpenWidget = () => {
+    if (!session || !selectedWallet) return
+    const walletId = selectedWallet.id
+
+    const onramp = createOnrampKit({
+      // Must match the server's widget origin. Omit for production.
+      widgetBaseUrl: process.env.NEXT_PUBLIC_ONRAMP_WIDGET_BASE_URL,
+    })
+
+    // Nothing async above this line — the click gesture is still live here.
+    const result = onramp.openWindow({
+      session,
+      onDepositSettled: ({ payload }) => {
+        toast.success(
+          `Deposit settled${payload.amount ? `: ${payload.amount} ${payload.tokenSymbol ?? ""}`.trim() : ""}`
+        )
+      },
+      onSessionExpired: () => {
+        mintOnrampSession(walletId)
+          .then((refreshed) => setMintedSession({ walletId, session: refreshed }))
+          .catch((error) => console.error("Failed to refresh expired onramp session:", error))
+      },
+    })
+
+    if (result.status === "blocked") {
+      if (result.reason === "popup_blocked") {
+        toast.error(result.errorMessage || "Popup blocked — allow popups for this site and try again.")
+      } else {
+        // in_app_browser / pwa_standalone: no popup is usable here at all.
+        toast.error("Buy Crypto isn't supported in this browser context. Open this page in a regular browser tab.")
+      }
+      return
+    }
+
+    // Hand off to the popup and close our launcher dialog — the popup keeps
+    // running independently of this component from here on.
+    setOpen(false)
+
+    // Sessions are single-use; pre-fetch a replacement for the next click.
+    mintOnrampSession(walletId)
+      .then((minted) => setMintedSession({ walletId, session: minted }))
+      .catch((error) => console.error("Failed to pre-fetch replacement onramp session:", error))
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button variant="outline">
-          <IconPlus className="mr-2 size-4" />
-          Add funds
-        </Button>
+        {trigger ?? (
+          <Button variant="outline">
+            <IconPlus className="size-4" />
+            Add Funds
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Add funds</DialogTitle>
+          <DialogTitle>Add Funds</DialogTitle>
           <DialogDescription>
-            Deposit USDC into your balance via Circle Gateway.
+            Buy crypto with fiat and settle it directly to a wallet.
           </DialogDescription>
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-4 py-4 pb-0">
+          <div className="grid gap-4 py-4 pb-0">
 
             {/* Reusable Wallet Selection Component */}
             <FormField
@@ -141,42 +219,16 @@ export function AddFundsDialog() {
               name="walletAddress"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Source Wallet</FormLabel>
+                  <FormLabel>Destination Wallet</FormLabel>
                   <FormControl>
                     <WalletSelect
                       value={field.value}
                       onValueChange={field.onChange}
-                      onSelectWallet={(wallet) => {
-                        // Store the composite value for the select component
-                        field.onChange(`${wallet.address}-${wallet.blockchain}`)
-                        // Store the actual address and blockchain for API calls
-                        setSelectedWalletAddress(wallet.address)
-                        setSelectedBlockchain(wallet.blockchain)
+                      onSelectWallet={(w) => {
+                        field.onChange(`${w.address}-${w.blockchain}`)
+                        setSelectedWallet(w)
                       }}
-                      disabled={isSubmitting}
                       excludeGatewaySigner
-                      minBalance={0}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {/* Amount Input */}
-            <FormField
-              control={form.control}
-              name="amount"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Amount (USDC)</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="100.00"
-                      disabled={isSubmitting}
-                      {...field}
                     />
                   </FormControl>
                   <FormMessage />
@@ -186,19 +238,24 @@ export function AddFundsDialog() {
 
             <DialogFooter>
               <DialogClose asChild>
-                <Button variant="outline" type="button" disabled={isSubmitting}>
+                <Button variant="outline" type="button">
                   Cancel
                 </Button>
               </DialogClose>
               <Button
-                type="submit"
-                disabled={isSubmitting || !walletAddress || !amount}
+                type="button"
+                onClick={handleOpenWidget}
+                disabled={!walletAddress || status !== "ready"}
               >
-                {isSubmitting && <IconLoader className="size-4 animate-spin" />}
-                Confirm Deposit
+                {status === "loading" ? (
+                  <IconLoader className="size-4 animate-spin" />
+                ) : (
+                  <IconCreditCard className="size-4" />
+                )}
+                Buy Crypto
               </Button>
             </DialogFooter>
-          </form>
+          </div>
         </Form>
       </DialogContent>
     </Dialog>

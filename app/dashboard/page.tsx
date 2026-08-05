@@ -28,6 +28,7 @@ import {
 } from "@tabler/icons-react"
 
 import { AddFundsDialog } from "@/components/add-funds-dialog"
+import { GatewayDepositDialog } from "@/components/gateway-deposit-dialog"
 import { NewWalletDialog } from "@/components/new-wallet-dialog"
 import { RebalanceButton } from "@/components/rebalance-button"
 import { SectionCards } from "@/components/section-cards"
@@ -224,14 +225,15 @@ export default function Page() {
 
       {/* Actions */}
       <div className="flex flex-wrap gap-3 mb-4 md:mb-6">
-        <TransferDialog />
-        <SendButton />
-        <RebalanceButton />
-        <AddFundsDialog />
         <Button variant="outline" onClick={() => setCreateWalletOpen(true)}>
-          <IconWallet className="mr-2 size-4" />
+          <IconWallet className="size-4" />
           New wallet
         </Button>
+        <AddFundsDialog />
+        <GatewayDepositDialog />
+        <TransferDialog />
+        <RebalanceButton />
+        <SendButton />
       </div>
 
       <SectionCards />
