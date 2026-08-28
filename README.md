@@ -168,3 +168,7 @@ This sample application:
 - Assumes testnet usage only
 - Handles secrets via environment variables
 - Is not intended for production use without modification
+
+## Legal disclaimer
+
+Sample apps provided for demonstration and educational purposes only, intended for Arc testnet use only, and not production-ready. See [Arc.io](https://arc.io) for more.
