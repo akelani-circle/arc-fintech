@@ -21,14 +21,21 @@ import type { SupportedChain } from "@/lib/circle/gateway-sdk";
  * session, so the widget lands funds on the same chain the destination
  * wallet actually lives on instead of silently defaulting to Ethereum.
  *
- * Circle's onramp kit does not document a public testnet tier yet — its own
- * SDK notes "No public sandbox exists today, so production is the default."
- * These values are inferred from the shared chain-identifier enum bundled
- * inside @crcl-main/onramp-kit's type declarations (Ethereum_Sepolia,
- * Base_Sepolia, Avalanche_Fuji, Arc_Testnet), not confirmed against a real
- * onramp session response. Verify against actual API behavior once testnet
- * support ships and correct this map if wallets-api expects a different
- * string.
+ * Only testnet chains appear here, and that is deliberate: the whole app runs
+ * against sandbox (see `@/lib/circle/onramp-environment`), and the session
+ * route refuses to mint rather than settle real fiat somewhere this app never
+ * reads.
+ *
+ * The strings are the ones the kit's own `Blockchain` enum declares
+ * (Ethereum_Sepolia, Base_Sepolia, Avalanche_Fuji, Arc_Testnet), so the spelling
+ * is confirmed — but they have not been round-tripped against a live sandbox
+ * session response. If wallets-api turns out to expect a different identifier
+ * for `destinationChain`, correct this map; a wrong value surfaces as a failed
+ * mint, not a misdirected deposit.
+ *
+ * Note the kit's inline docs still read "No public sandbox exists today, so
+ * production is the default" — that predates the sandbox tier and describes the
+ * kit's *default*, not its capability.
  */
 export const ONRAMP_CHAIN_IDS: Record<SupportedChain, string> = {
   ethSepolia: "Ethereum_Sepolia",

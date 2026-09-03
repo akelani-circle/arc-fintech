@@ -18,19 +18,30 @@ import { NextRequest, NextResponse } from "next/server";
 import { createOnrampServerKit, type OnrampServerKit } from "@crcl-main/onramp-kit/server";
 import { createClient } from "@/lib/supabase/server";
 import { DB_BLOCKCHAIN_TO_ONRAMP_CHAIN } from "@/lib/circle/onramp-chains";
+import { ONRAMP_WIDGET_BASE_URL } from "@/lib/circle/onramp-environment";
+import {
+  ONRAMP_API_BASE_URL,
+  assertOnrampSandbox,
+} from "@/lib/circle/onramp-server-environment";
 
 // Constructed lazily (not at module scope): createOnrampServerKit validates
 // kitKey eagerly and throws if it's missing, which would otherwise break
-// Next's build-time page-data collection whenever KIT_KEY isn't set.
+// Next's build-time page-data collection whenever KIT_KEY isn't set. The
+// environment assertion runs here for the same reason.
 let server: OnrampServerKit | undefined;
 
 function getServer(): OnrampServerKit {
   if (!server) {
+    // Both halves of the config have to agree, and both have to be sandbox:
+    // unset means production, and this app only settles to testnets.
+    assertOnrampSandbox();
+
     server = createOnrampServerKit({
       kitKey: process.env.KIT_KEY!,
-      // Omit both URLs for production. Set both to point at staging:
-      baseUrl: process.env.ONRAMP_API_BASE_URL,
-      widgetBaseUrl: process.env.NEXT_PUBLIC_ONRAMP_WIDGET_BASE_URL,
+      // Passed through verbatim. Undefined would leave the kit on its own
+      // production defaults, which assertOnrampSandbox has just ruled out.
+      baseUrl: ONRAMP_API_BASE_URL,
+      widgetBaseUrl: ONRAMP_WIDGET_BASE_URL,
     });
   }
   return server;

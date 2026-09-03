@@ -26,6 +26,8 @@ import { toast } from "sonner"
 import { createOnrampKit, parseOnrampSession, type OnrampSession } from "@crcl-main/onramp-kit"
 import * as z from "zod"
 
+import { ONRAMP_WIDGET_BASE_URL } from "@/lib/circle/onramp-environment"
+
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -153,8 +155,10 @@ export function AddFundsDialog({ wallet, trigger }: AddFundsDialogProps) {
     const walletId = selectedWallet.id
 
     const onramp = createOnrampKit({
-      // Must match the server's widget origin. Omit for production.
-      widgetBaseUrl: process.env.NEXT_PUBLIC_ONRAMP_WIDGET_BASE_URL,
+      // Must match the origin the server minted the session against. The
+      // session route refuses to mint unless both resolve to sandbox, so by
+      // the time there is a session to open, this is the sandbox widget.
+      widgetBaseUrl: ONRAMP_WIDGET_BASE_URL,
     })
 
     // Nothing async above this line — the click gesture is still live here.
