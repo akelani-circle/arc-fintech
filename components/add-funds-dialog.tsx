@@ -186,6 +186,15 @@ export function AddFundsDialog({ wallet, trigger }: AddFundsDialogProps) {
       return
     }
 
+    // Browser events are a UI hint only — a closed tab means no SETTLED event
+    // ever arrives, so they can't be the record of truth (that's the
+    // onramp.deposit.settled webhook, applied server-side). Logged here so a
+    // purchase is traceable in the console while that webhook path is
+    // unverified against a real delivery.
+    result.widget.on("*", (envelope) => {
+      console.log("onramp", envelope.event, envelope.payload)
+    })
+
     // Hand off to the popup and close our launcher dialog — the popup keeps
     // running independently of this component from here on.
     setOpen(false)

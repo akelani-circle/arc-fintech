@@ -83,3 +83,45 @@ describe("assertOnrampSandbox", () => {
     )
   })
 })
+
+describe("resolveReferrerDomain", () => {
+  async function loadReferrer(appUrl: string | undefined, webhookUrl: string | undefined) {
+    vi.resetModules()
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", appUrl as string)
+    vi.stubEnv("WEBHOOK_ENDPOINT_URL", webhookUrl as string)
+    return import("@/lib/circle/onramp-server-environment")
+  }
+
+  it("prefers NEXT_PUBLIC_APP_URL, reduced to a bare hostname", async () => {
+    const { resolveReferrerDomain } = await loadReferrer(
+      "https://fintech-starter.example.com",
+      "https://tunnel.ngrok-free.app/api/circle/webhook"
+    )
+    expect(resolveReferrerDomain()).toBe("fintech-starter.example.com")
+  })
+
+  // WEBHOOK_ENDPOINT_URL is the one actually populated in local dev (an ngrok
+  // tunnel); NEXT_PUBLIC_APP_URL is typically unset until deployed.
+  it("falls back to WEBHOOK_ENDPOINT_URL's host, dropping the path", async () => {
+    const { resolveReferrerDomain } = await loadReferrer(
+      undefined,
+      "https://tunnel.ngrok-free.app/api/circle/webhook"
+    )
+    expect(resolveReferrerDomain()).toBe("tunnel.ngrok-free.app")
+  })
+
+  it("drops a port, matching the kit's bare-hostname requirement", async () => {
+    const { resolveReferrerDomain } = await loadReferrer("http://localhost:3000", undefined)
+    expect(resolveReferrerDomain()).toBe("localhost")
+  })
+
+  it("returns undefined rather than throwing when neither is set", async () => {
+    const { resolveReferrerDomain } = await loadReferrer(undefined, undefined)
+    expect(resolveReferrerDomain()).toBeUndefined()
+  })
+
+  it("returns undefined for a malformed URL instead of sending garbage", async () => {
+    const { resolveReferrerDomain } = await loadReferrer("not-a-url", undefined)
+    expect(resolveReferrerDomain()).toBeUndefined()
+  })
+})

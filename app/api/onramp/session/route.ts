@@ -22,6 +22,7 @@ import { ONRAMP_WIDGET_BASE_URL } from "@/lib/circle/onramp-environment";
 import {
   ONRAMP_API_BASE_URL,
   assertOnrampSandbox,
+  resolveReferrerDomain,
 } from "@/lib/circle/onramp-server-environment";
 
 // Constructed lazily (not at module scope): createOnrampServerKit validates
@@ -102,14 +103,17 @@ export async function POST(req: NextRequest) {
     }
 
     // Every session parameter is derived server-side; nothing from the request
-    // body is forwarded. The kit's schema also accepts `referrerDomain`, which
-    // is sealed into the session JWT and handed to the widget host as a
-    // `frame-ancestors` CSP claim — a client-supplied value there would let a
-    // caller widen that allowlist to a domain of their choosing.
+    // body is forwarded. `referrerDomain` in particular is never taken from the
+    // client: it's sealed into the session JWT and handed to the widget host as
+    // a `frame-ancestors` CSP claim, so a caller-supplied value would let them
+    // widen that allowlist to a domain of their choosing. resolveReferrerDomain
+    // derives it instead, from the same server-side config the Gateway webhook
+    // URL already comes from.
     const session = await getServer().createSession({
       userId: user.id, // never trust a client-supplied userId
       destinationAddress: wallet.address,
       destinationChain,
+      referrerDomain: resolveReferrerDomain(),
     });
 
     return NextResponse.json(session, {

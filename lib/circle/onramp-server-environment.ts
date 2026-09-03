@@ -99,3 +99,30 @@ export function assertOnrampSandbox(): void {
     );
   }
 }
+
+/**
+ * Bare hostname to seal into the onramp session as `referrerDomain`, so
+ * Circle can build a `frame-ancestors` allowlist naming this app.
+ *
+ * Per Circle's onramp-kit testing guide: unenforced in sandbox ("you can
+ * test without it, but set it to verify your wiring") but required in
+ * production, where a session for an unregistered hostname is refused
+ * with a 403. `assertOnrampSandbox` currently blocks production outright,
+ * so nothing depends on this yet — but deriving it now, the same way the
+ * Gateway webhook URL is derived from the same env vars, means one less
+ * thing to break if that guard is ever deliberately relaxed.
+ *
+ * Never accept this from the client: a caller-supplied value would let
+ * them widen Circle's allowlist to a domain of their choosing. `undefined`
+ * (an unset/malformed URL) is fine — the kit simply omits the field, which
+ * is exactly what "unenforced in sandbox" describes.
+ */
+export function resolveReferrerDomain(): string | undefined {
+  const url = process.env.NEXT_PUBLIC_APP_URL || process.env.WEBHOOK_ENDPOINT_URL;
+  if (!url) return undefined;
+  try {
+    return new URL(url).hostname || undefined;
+  } catch {
+    return undefined;
+  }
+}
