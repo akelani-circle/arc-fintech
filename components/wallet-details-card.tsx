@@ -31,6 +31,7 @@ import {
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { getExplorerUrl, formatDate } from "@/lib/utils/data-formatters"
+import { AddFundsDialog } from "@/components/add-funds-dialog"
 
 // Type definitions
 interface WalletDetails {
@@ -152,7 +153,16 @@ export function WalletDetailsCard({ wallet }: { wallet: WalletDetails }) {
                 <IconRefresh className="h-4 w-4 mr-2" />
                 View All Activity
               </Button>
-              <Button variant="outline" className="w-full justify-start">
+              <AddFundsDialog
+                wallet={{ id: wallet.id, address: wallet.address, blockchain: wallet.blockchain, name: wallet.name }}
+                trigger={
+                  <Button variant="outline" className="w-full justify-start">
+                    <IconWallet className="h-4 w-4 mr-2" />
+                    Add Funds
+                  </Button>
+                }
+              />
+              <Button variant="outline" className="w-full justify-start" disabled>
                 <IconArrowUpRight className="h-4 w-4 mr-2" />
                 Send Funds (comming soon)
               </Button>

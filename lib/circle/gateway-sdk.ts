@@ -821,7 +821,7 @@ async function rateLimitedDelay() {
   lastRpcCall = Date.now();
 }
 
-async function withRetry<T>(
+export async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries = 3,
   initialDelay = 1000
@@ -836,11 +836,14 @@ async function withRetry<T>(
       lastError = error;
 
       const err = error as { message?: string; status?: number; details?: string };
-      // Check if it's a rate limit error
+      // Arc testnet's RPC returns code -32011 with details "request limit
+      // reached" for throttling, not the "rate limit"/429 wording this
+      // originally looked for — match both phrasings.
       const isRateLimitError =
         err?.message?.includes("429") ||
         err?.status === 429 ||
-        err?.details?.includes("rate limit");
+        err?.details?.includes("rate limit") ||
+        err?.details?.includes("limit reached");
 
       if (isRateLimitError && attempt < maxRetries - 1) {
         const delay = initialDelay * Math.pow(2, attempt);

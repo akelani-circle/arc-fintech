@@ -28,6 +28,7 @@ import {
   IconArrowUp,
   IconArrowDown,
   IconArrowsSort,
+  IconPlus,
 } from "@tabler/icons-react"
 import { format } from "date-fns"
 import { toast } from "sonner"
@@ -47,6 +48,7 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { shortenAddress, getExplorerUrl } from "@/lib/utils/data-formatters"
 import { useBalanceContext } from "@/lib/contexts/balance-context"
+import { AddFundsDialog } from "@/components/add-funds-dialog"
 
 type Wallet = {
   id: string
@@ -218,6 +220,7 @@ export default function Page() {
                   {sortIcon("created_at")}
                 </Button>
               </TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -231,6 +234,7 @@ export default function Page() {
                   <TableCell className="text-right"><Skeleton className="h-5 w-16 ml-auto" /></TableCell>
                   <TableCell className="text-right"><Skeleton className="h-5 w-16 ml-auto" /></TableCell>
                   <TableCell className="text-right"><Skeleton className="h-5 w-24 ml-auto" /></TableCell>
+                  <TableCell className="text-right"><Skeleton className="h-5 w-16 ml-auto" /></TableCell>
                 </TableRow>
               ))
             ) : paginatedWallets.length === 0 ? (
@@ -246,9 +250,14 @@ export default function Page() {
                 // API returns "$100.00 (CHAIN)" or "$0.00"
                 const displayBalance = balanceString ? balanceString.split(' (')[0] : null
                 const eurcBalanceString = eurcBalances[wallet.circle_wallet_id]
-                const displayEurcBalance = eurcBalanceString
-                  ? eurcBalanceString.split(' (')[0]
-                  : null
+                // Only `undefined` means "not fetched yet". The balance API
+                // deliberately returns an empty string for Gateway signer
+                // wallets, which custody USDC on-chain and never hold EURC —
+                // treating that as unloaded left the cell spinning forever.
+                const displayEurcBalance =
+                  eurcBalanceString === undefined
+                    ? null
+                    : eurcBalanceString.split(' (')[0] || "—"
 
                 return (
                   <TableRow
@@ -332,6 +341,17 @@ export default function Page() {
                     </TableCell>
                     <TableCell className="text-right text-muted-foreground">
                       {format(new Date(wallet.created_at), "MMM d, yyyy")}
+                    </TableCell>
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                      <AddFundsDialog
+                        wallet={{ id: wallet.id, address: wallet.address, blockchain: wallet.blockchain, name: wallet.name }}
+                        trigger={
+                          <Button variant="outline" size="sm">
+                            <IconPlus className="size-4" />
+                            Add Funds
+                          </Button>
+                        }
+                      />
                     </TableCell>
                   </TableRow>
                 )

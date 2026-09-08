@@ -19,6 +19,10 @@
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  buildOnrampTransactionRow,
+  type OnrampDepositNotification,
+} from "@/lib/circle/onramp-deposit";
 
 // Fail fast at module load if the webhook's required env vars aren't
 // configured. This is a secret-key + public-URL pair: missing either
@@ -407,6 +411,57 @@ async function applyGatewayDeposit(
   }
 }
 
+/**
+ * Apply an `onramp.deposit.settled` event: a customer completed a fiat->USDC
+ * purchase inside Circle's hosted onramp widget and the deposit has settled
+ * on-chain.
+ *
+ * Unlike the gateway/wallet flows above, the app never wrote a row for this
+ * transaction ahead of time — the purchase happened entirely inside Circle's
+ * widget, so this webhook is the first (and authoritative) the app hears
+ * about it. The onramp kit's client-side DEPOSIT_SETTLED event is a UI hint
+ * only. Idempotent on `onramp_session_id` (in addition to the general
+ * `webhook_events` dedupe above) since a session should only ever produce
+ * one deposit.
+ */
+async function applyOnrampDeposit(
+  notification: OnrampDepositNotification
+): Promise<void> {
+  const built = buildOnrampTransactionRow(notification);
+  if (!built.ok) {
+    // Unmappable payloads are permanent failures — a retry delivers the same
+    // bytes — so these are logged and swallowed rather than thrown.
+    console.error(
+      `Rejected onramp deposit (${built.reason}):`,
+      notification
+    );
+    return;
+  }
+
+  const { data: existing, error: existingErr } = await supabaseAdmin
+    .from("transactions")
+    .select("id")
+    .eq("onramp_session_id", built.row.onramp_session_id)
+    .maybeSingle();
+
+  // Transient: throwing releases the dedupe row so Circle's retry can land.
+  if (existingErr) {
+    throw new Error(`Onramp deposit lookup failed: ${existingErr.message}`);
+  }
+  if (existing) return;
+
+  const { error: insertErr } = await supabaseAdmin
+    .from("transactions")
+    .insert(built.row);
+
+  if (insertErr) {
+    // 23505: the partial unique index on onramp_session_id fired, meaning a
+    // concurrent delivery for this session won the race. Already recorded.
+    if ((insertErr as { code?: string }).code === "23505") return;
+    throw new Error(`Failed to record onramp deposit: ${insertErr.message}`);
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const signature = req.headers.get("x-circle-signature");
@@ -483,6 +538,38 @@ export async function POST(req: NextRequest) {
       await applyGatewayDeposit(
         notification as unknown as GatewayDepositNotification
       );
+    } else if (notificationType === "onramp.deposit.settled") {
+      try {
+        await applyOnrampDeposit(
+          notification as unknown as OnrampDepositNotification
+        );
+      } catch (applyErr) {
+        // The dedupe row was written *before* the side effects ran, so leaving
+        // it in place makes Circle's retries ack as duplicates and drop the
+        // event for good. The handlers above can survive that — their rows
+        // already exist and get reconciled later — but an onramp deposit has no
+        // other record anywhere, so losing it means money arrived and the app
+        // never knows. Release the dedupe row and 500 so the retry gets a real
+        // second attempt.
+        console.error("Failed to apply onramp deposit:", applyErr);
+
+        const { error: releaseErr } = await supabaseAdmin
+          .from("webhook_events")
+          .delete()
+          .eq("notification_id", notification.id);
+
+        if (releaseErr) {
+          console.error(
+            "Failed to release webhook dedupe row; this deposit will not be retried:",
+            releaseErr
+          );
+        }
+
+        return NextResponse.json(
+          { error: "Failed to apply onramp deposit" },
+          { status: 500 }
+        );
+      }
     }
 
     return NextResponse.json({ received: true }, { status: 200 });
