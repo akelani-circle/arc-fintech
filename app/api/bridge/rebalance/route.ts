@@ -74,8 +74,9 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       transferSpeed,
     } = parsed.data;
 
-    // App Kit expects amount in human-readable decimal format
-    const amountString = amountNum.toFixed(2);
+    // App Kit expects amount in human-readable decimal format. Estimate at
+    // USDC precision (6 decimals), same as the estimate route.
+    const amountString = amountNum.toFixed(6);
     let estimatedBridgeFee = 0;
 
     // Map chains to App Kit format
