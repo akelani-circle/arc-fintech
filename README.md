@@ -46,8 +46,8 @@ The dashboard is organized into a set of pages, each backed by Circle APIs:
    ```
 
    ```bash
-   git clone git@github.com:akelani-circle/fintech-starter.git
-   cd fintech-starter
+   git clone git@github.com:circlefin/arc-fintech.git
+   cd arc-fintech
    npm install
    ```
 
