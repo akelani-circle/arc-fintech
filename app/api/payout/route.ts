@@ -56,6 +56,10 @@ import {
   formatUsdcAtomicUnits,
   parseUsdcAmountToAtomicUnits,
 } from "@/lib/circle/usdc-amount";
+import {
+  screenRecipientForTransfer,
+  shouldBlockTransfer,
+} from "@/lib/compliance/utils";
 import type { Address } from "viem";
 
 async function getCircleWalletAddress(walletId: string): Promise<Address> {
@@ -143,6 +147,33 @@ export const POST = withAuth(async (req, { user, supabase }) => {
     const amountDisplay = formatUsdcAtomicUnits(amountInAtomicUnits);
     const amountNum = Number(amountDisplay);
     const destinationChain: SupportedChain = requestedChain || "arcTestnet";
+
+    // Screen the recipient on the server before any funds move. The dialog's
+    // client-side check can be skipped by calling this endpoint directly.
+    const complianceBlockchain = CHAIN_TO_BLOCKCHAIN[destinationChain];
+    if (!complianceBlockchain) {
+      return NextResponse.json(
+        { error: `Unsupported destination chain: ${destinationChain}` },
+        { status: 400 }
+      );
+    }
+    const complianceResult = await screenRecipientForTransfer(
+      recipientAddress,
+      complianceBlockchain
+    );
+    if (shouldBlockTransfer(complianceResult)) {
+      return NextResponse.json(
+        {
+          error: "Transaction blocked by compliance screening",
+          result: complianceResult,
+          userMessage:
+            complianceResult === "ERROR"
+              ? "Compliance screening is currently unavailable. Please retry."
+              : "This address has been flagged and transactions are blocked.",
+        },
+        { status: complianceResult === "ERROR" ? 503 : 403 }
+      );
+    }
 
     // Fetch user's wallets
     const { data: wallets, error: walletsError } = await supabase
