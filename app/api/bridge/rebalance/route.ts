@@ -16,6 +16,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { randomUUID } from "node:crypto";
+import type { AppKitActions } from "@circle-fin/app-kit";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAppKit, getCircleWalletsAdapter } from "@/lib/circle/app-kit";
@@ -283,7 +285,14 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       signalBurn = resolve;
     });
 
-    kit.on("bridge.burn", async (payload) => {
+    // `kit` is a shared singleton, and every kit.bridge() call picks up every
+    // handler registered on it at that moment. So tag this transfer with its
+    // own traceId, have the handlers skip events from other transfers, and
+    // remove them once this transfer settles so they don't pile up.
+    const traceId = randomUUID();
+
+    const onBurn = async (payload: AppKitActions["bridge.burn"]) => {
+      if (payload.traceId !== traceId) return;
       const hash = extractTxHash(payload);
       if (hash && !burnTxHash) {
         burnTxHash = hash;
@@ -293,12 +302,16 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           .eq("id", txData.id);
         signalBurn();
       }
-    });
+    };
 
-    kit.on("bridge.mint", async (payload) => {
+    const onMint = (payload: AppKitActions["bridge.mint"]) => {
+      if (payload.traceId !== traceId) return;
       const hash = extractTxHash(payload);
       if (hash) mintTxHash = hash;
-    });
+    };
+
+    kit.on("bridge.burn", onBurn);
+    kit.on("bridge.mint", onMint);
 
     // Run the bridge to completion in the background. Its resolution updates the
     // row to its terminal state and is best-effort: in a serverless deploy the
@@ -318,6 +331,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
         config: {
           transferSpeed: transferSpeed as "FAST" | "SLOW",
         },
+        invocationMeta: { traceId },
       })
       .then(async (result) => {
         if (!burnTxHash && result.steps && Array.isArray(result.steps)) {
@@ -364,6 +378,10 @@ export const POST = withAuth(async (request, { user, supabase }) => {
 
         signalBurn();
         return { ok: false as const, error: bridgeError };
+      })
+      .finally(() => {
+        kit.off("bridge.burn", onBurn);
+        kit.off("bridge.mint", onMint);
       });
 
     // Respond as soon as EITHER the burn is broadcast (common: reply 202
