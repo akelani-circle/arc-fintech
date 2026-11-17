@@ -174,18 +174,27 @@ export function EarnActionPanel({ vault }: { vault: EarnVault }) {
         throw new Error(data.userMessage || data.error || "Request failed")
       }
 
-      toast.success(
-        mode === "deposit" ? "Deposit confirmed" : "Withdrawal confirmed",
-        {
-          description: `${trimAmount(data.amount)} ${vault.asset} - ${vault.name}`,
-          action: data.explorerUrl
-            ? {
-                label: "View",
-                onClick: () => window.open(data.explorerUrl, "_blank"),
-              }
-            : undefined,
-        }
-      )
+      if (data.pending) {
+        // 202: submitted but not confirmed yet. Not a failure, and not safe
+        // to retry.
+        toast.info(
+          mode === "deposit" ? "Deposit submitted" : "Withdrawal submitted",
+          { description: data.userMessage, duration: 10000 }
+        )
+      } else {
+        toast.success(
+          mode === "deposit" ? "Deposit confirmed" : "Withdrawal confirmed",
+          {
+            description: `${trimAmount(data.amount)} ${vault.asset} - ${vault.name}`,
+            action: data.explorerUrl
+              ? {
+                  label: "View",
+                  onClick: () => window.open(data.explorerUrl, "_blank"),
+                }
+              : undefined,
+          }
+        )
+      }
       setAmount("")
       setQuote(null)
       // Refresh position, vault liquidity, and the dashboard balances.

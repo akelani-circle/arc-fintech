@@ -20,6 +20,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
+  // Same as leaving it unset (prefetches include dynamic data, as before Next
+  // 16.4); set explicitly only to silence Next's build warning.
+  partialPrefetching: false,
 };
 
 export default nextConfig;

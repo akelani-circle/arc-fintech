@@ -15,6 +15,7 @@ import { z } from "zod"
 import type { SupabaseClient, User } from "@supabase/supabase-js"
 import { validateJsonBody, evmAddressSchema } from "@/lib/api/validate"
 import { earnDeposit, earnWithdraw, getEarnError } from "@/lib/circle/earn-ops"
+import { getUnconfirmedBatchId } from "@/lib/earn/errors"
 import { resolveEarnWallet } from "@/lib/earn/resolve-wallet"
 import { EARN_BLOCKCHAIN } from "@/lib/circle/earn-kit"
 
@@ -76,6 +77,42 @@ export async function handleEarnWrite(
     return NextResponse.json({ success: true, ...result })
   } catch (error) {
     console.error(`Earn ${action} error:`, error)
+
+    // Submitted, but EarnKit stopped waiting before it confirmed. It may still
+    // land (on Arc Testnet a batch has sat in SENT for minutes), so answering
+    // with an error made users retry, and a withdrawal that later succeeded
+    // never showed up in Activity. Record it as PENDING under its Circle
+    // transaction id; the transactions.* webhook settles it by that id.
+    const batchId = getUnconfirmedBatchId(error)
+    if (batchId) {
+      const isDeposit = action === "deposit"
+      const { error: insertError } = await supabase.from("transactions").insert([
+        {
+          user_id: user.id,
+          amount: Number(amount),
+          sender_address: isDeposit ? wallet.address : vaultAddress,
+          recipient_address: isDeposit ? vaultAddress : wallet.address,
+          tx_hash: null,
+          circle_transaction_id: batchId,
+          blockchain: EARN_BLOCKCHAIN,
+          type: isDeposit ? "EARN_DEPOSIT" : "EARN_WITHDRAW",
+          status: "PENDING",
+        },
+      ])
+      if (insertError) {
+        console.error("Failed to log pending earn transaction to Supabase:", insertError)
+      }
+      return NextResponse.json(
+        {
+          pending: true,
+          batchId,
+          amount,
+          userMessage: `The ${action} was submitted but hasn't confirmed yet. Don't retry: Activity updates when it settles.`,
+        },
+        { status: 202 }
+      )
+    }
+
     const mapped = getEarnError(error)
     return NextResponse.json(
       { error: mapped.error, userMessage: mapped.userMessage },

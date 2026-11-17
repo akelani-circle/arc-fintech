@@ -26,7 +26,6 @@ import {
   type SupportedChain,
   getUsdcBalance,
   getTokenBalance,
-  fetchGatewayBalance,
   GATEWAY_WALLET_ADDRESS,
   PollingTimeoutError,
 } from "@/lib/circle/gateway-sdk";
@@ -38,6 +37,7 @@ import {
   buildUnifiedBalanceGatewayAllocatedSources,
   getUnifiedBalancePayoutError,
   normalizeUnifiedBalanceGatewaySpendResult,
+  shouldUseAutoGatewayFallback,
   planUnifiedBalanceGatewayAllocations,
 } from "@/lib/circle/unified-balance-payout";
 import {
@@ -52,13 +52,15 @@ import {
   CHAIN_LABEL_BY_SDK_CHAIN as CHAIN_LABELS,
 } from "@/lib/constants/chains";
 import { CURRENCIES, type Currency } from "@/lib/constants/currency";
+import {
+  formatUsdcAtomicUnits,
+  parseUsdcAmountToAtomicUnits,
+} from "@/lib/circle/usdc-amount";
+import {
+  screenRecipientForTransfer,
+  shouldBlockTransfer,
+} from "@/lib/compliance/utils";
 import type { Address } from "viem";
-
-function convertToSmallestUnit(amount: string): string {
-  const val = parseFloat(amount);
-  if (isNaN(val)) return "0";
-  return BigInt(Math.floor(val * 1_000_000)).toString();
-}
 
 async function getCircleWalletAddress(walletId: string): Promise<Address> {
   const response = await circleDeveloperSdk.getWallet({ id: walletId });
@@ -94,6 +96,18 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       );
     }
 
+    // A "wallet" source needs the wallet to send from. Without it the request
+    // would fall into the "auto" routing below, which is not what was asked.
+    if (sourceType === "wallet" && !sourceWalletId) {
+      return NextResponse.json(
+        {
+          error: "Missing sourceWalletId",
+          userMessage: "Please select a wallet to use as payment source.",
+        },
+        { status: 400 }
+      );
+    }
+
     // A non-USDC payout is only satisfiable on a true same-chain wallet source
     // (the `else` branch below, which calls sendUsdcOnSameChainWithAppKit
     // directly). "auto" picks its wallet by USDC balance, and every
@@ -124,13 +138,54 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       );
     }
 
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum <= 0) {
+    // Parse the requested amount strictly. parseFloat would accept partially
+    // numeric input like "1USDC" (-> 1) or "1.5abc" (-> 1.5) and silently move a
+    // value the caller never wrote; parseUsdcAmountToAtomicUnits rejects anything
+    // that is not a clean non-negative six-decimal amount.
+    const amountString = typeof amount === "number" ? amount.toString() : amount;
+    let amountInAtomicUnits: bigint;
+    try {
+      amountInAtomicUnits = parseUsdcAmountToAtomicUnits(amountString);
+    } catch {
+      return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
+    }
+    if (amountInAtomicUnits <= BigInt(0)) {
       return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
     }
 
-    const amountInAtomicUnits = BigInt(convertToSmallestUnit(amount));
+    // Canonical string / number derived from the validated atomic units, so
+    // every downstream SDK call and the persisted amount reflect the exact value
+    // that was validated — never a re-parsed float.
+    const amountDisplay = formatUsdcAtomicUnits(amountInAtomicUnits);
+    const amountNum = Number(amountDisplay);
     const destinationChain: SupportedChain = requestedChain || "arcTestnet";
+
+    // Screen the recipient on the server before any funds move. The dialog's
+    // client-side check can be skipped by calling this endpoint directly.
+    const complianceBlockchain = CHAIN_TO_BLOCKCHAIN[destinationChain];
+    if (!complianceBlockchain) {
+      return NextResponse.json(
+        { error: `Unsupported destination chain: ${destinationChain}` },
+        { status: 400 }
+      );
+    }
+    const complianceResult = await screenRecipientForTransfer(
+      recipientAddress,
+      complianceBlockchain
+    );
+    if (shouldBlockTransfer(complianceResult)) {
+      return NextResponse.json(
+        {
+          error: "Transaction blocked by compliance screening",
+          result: complianceResult,
+          userMessage:
+            complianceResult === "ERROR"
+              ? "Compliance screening is currently unavailable. Please retry."
+              : "This address has been flagged and transactions are blocked.",
+        },
+        { status: complianceResult === "ERROR" ? 503 : 403 }
+      );
+    }
 
     // Fetch user's wallets
     const { data: wallets, error: walletsError } = await supabase
@@ -165,9 +220,33 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       }
     }
 
+    // Auto prefers a same-chain wallet that can cover the amount, and
+    // otherwise spends the unified Gateway balance, exactly like an explicit
+    // "gateway" source. (It used to look for Gateway balance deposited by the
+    // signer EOAs, which never hold any: deposits come from the user's wallets.
+    // When it did find some, it crashed on an unset depositor.) The signer
+    // EOAs only sign burn intents, so they are never a payout source.
+    const signerWalletIds = new Set(
+      wallets
+        .filter((w) => w.type === "gateway_signer")
+        .map((w) => w.circle_wallet_id)
+    );
+    const payoutSourceBalances = walletBalances.filter(
+      (w) => !signerWalletIds.has(w.walletId)
+    );
+    const effectiveSourceType =
+      sourceType === "auto" &&
+      shouldUseAutoGatewayFallback(
+        payoutSourceBalances,
+        destinationChain,
+        amountInAtomicUnits
+      )
+        ? "gateway"
+        : sourceType;
+
     // Routing logic based on source type
     let sourceWallet: WalletBalance | undefined;
-    let depositorWallet: typeof wallets[0] | undefined; // Wallet that has the Gateway balance
+    let depositorAddress: Address | undefined; // EOA that holds the Gateway balance (burn source)
     let strategy: "same-chain" | "gateway" = "same-chain";
     let estimatedFee = 0.50;
     let estimatedTime = 30;
@@ -234,10 +313,12 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         estimatedFee = 2.01;
         estimatedTime = 60;
         useGateway = true;
+        // The selected wallet is the EOA whose Gateway balance will be burned
+        depositorAddress = selectedWallet.address as Address;
       }
 
       console.log(`User selected wallet: ${sourceWallet.walletId} on ${sourceWallet.chain}`);
-    } else if (sourceType === "gateway") {
+    } else if (effectiveSourceType === "gateway") {
       const destinationBlockchain = CHAIN_TO_BLOCKCHAIN[destinationChain];
       const destinationAppKitChain =
         APP_KIT_CHAIN_BY_BLOCKCHAIN[destinationBlockchain];
@@ -351,7 +432,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         const allocationPlan = planUnifiedBalanceGatewayAllocations(
           balanceProbe.breakdown,
           uniqueAddresses,
-          amountNum.toString()
+          amountDisplay
         );
 
         if (!allocationPlan.isSufficient || allocationPlan.allocations.length === 0) {
@@ -413,7 +494,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         }
 
         await getAppKit().unifiedBalance.estimateSpend({
-          amount: amountNum.toString(),
+          amount: amountDisplay,
           token: "USDC",
           from: fromSources,
           to: {
@@ -427,7 +508,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         console.log(destinationAppKitChain)
 
         const spendResult = await getAppKit().unifiedBalance.spend({
-          amount: amountNum.toString(),
+          amount: amountDisplay,
           token: "USDC",
           from: fromSources,
           to: {
@@ -448,8 +529,9 @@ export const POST = withAuth(async (req, { user, supabase }) => {
             amount: amountNum,
             sender_address: normalized.senderAddress ?? uniqueAddresses[0],
             recipient_address: recipientAddress,
+            // txId is a Gateway transfer id, not a Circle DCW transaction id.
             tx_hash: normalized.txHash ?? null,
-            circle_transaction_id: normalized.txId,
+            circle_transaction_id: null,
             blockchain: destinationBlockchain,
             type: "OUTBOUND",
             status: "PENDING",
@@ -485,100 +567,16 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         );
       }
     } else {
-      // Auto mode: Try same-chain first (optimal)
-      sourceWallet = walletBalances.find(
+      // Auto mode with a same-chain wallet that covers the amount (otherwise
+      // it was routed to the Gateway branch above).
+      sourceWallet = payoutSourceBalances.find(
         (w) => w.chain === destinationChain && w.balance >= amountInAtomicUnits
-      );
-
-      if (!sourceWallet) {
-        // No wallet on destination chain - check Gateway balance using EOA addresses
-        // Get Gateway EOA wallets to check their deposited balances
-        const { data: gatewayWallets, error: gwError } = await supabase
-          .from("wallets")
-          .select("*")
-          .eq("user_id", user.id)
-          .eq("type", "gateway_signer");
-
-        if (gwError || !gatewayWallets || gatewayWallets.length === 0) {
-          return NextResponse.json(
-            { 
-              error: "No funds available",
-              userMessage: `No USDC available on ${CHAIN_LABELS[destinationChain]} and no Gateway balance. Please add funds or use a different chain.`
-            },
-            { status: 400 }
-          );
-        }
-
-        // Check Gateway balance for ALL unique EOA addresses
-        // We need to check all unique addresses to find which has sufficient balance
-        let maxGatewayBalance = BigInt(0);
-        let bestSourceChain: SupportedChain | undefined;
-        let eoaAddressWithBalance: Address | undefined;
-
-        // Get unique EOA addresses
-        const uniqueEOAs = Array.from(new Set(gatewayWallets.map(w => w.address.toLowerCase())));
-        console.log(`Auto mode: Checking Gateway balance for ${uniqueEOAs.length} unique EOA address(es)`);
-
-        for (const eoaAddressStr of uniqueEOAs) {
-          const eoaAddress = eoaAddressStr as Address;
-          
-          try {
-            console.log(`  Checking Gateway balance for EOA ${eoaAddress}`);
-            const gatewayBalance = await fetchGatewayBalance(eoaAddress);
-            
-            if (gatewayBalance.balances && Array.isArray(gatewayBalance.balances)) {
-              for (const bal of gatewayBalance.balances) {
-                const balanceNum = parseFloat(bal.balance);
-                const balanceInAtomicUnits = BigInt(Math.floor(balanceNum * 1_000_000));
-                
-                // Map domain to chain
-                const { CHAIN_BY_DOMAIN } = await import("@/lib/circle/gateway-sdk");
-                const chainName = CHAIN_BY_DOMAIN[bal.domain];
-                const chain = chainName as SupportedChain;
-                
-                console.log(`    Balance on ${chain}: ${balanceNum} USDC`);
-                
-                if (balanceInAtomicUnits > maxGatewayBalance) {
-                  maxGatewayBalance = balanceInAtomicUnits;
-                  bestSourceChain = chain;
-                  eoaAddressWithBalance = eoaAddress;
-                }
-              }
-            }
-          } catch (error) {
-            console.error(`  Error checking Gateway balance for ${eoaAddress}:`, error);
-          }
-        }
-
-        if (maxGatewayBalance < amountInAtomicUnits) {
-          return NextResponse.json(
-            { 
-              error: "Insufficient funds",
-              userMessage: `Not enough USDC. Gateway balance: ${Number(maxGatewayBalance) / 1_000_000} USDC, Required: ${amountNum} USDC.`
-            },
-            { status: 400 }
-          );
-        }
-
-        // Use any Circle wallet for minting, but we'll use the best source chain for burning
-        sourceWallet = walletBalances.length > 0 ? walletBalances[0] : undefined;
-        
-        if (!sourceWallet) {
-          return NextResponse.json(
-            { error: "No wallets found" },
-            { status: 404 }
-          );
-        }
-
-        // Override the source chain to be where the Gateway balance is
-        sourceWallet.chain = bestSourceChain!;
-
-        useGateway = true;
-        strategy = "gateway";
-        estimatedFee = 2.01;
-        estimatedTime = 60;
-        console.log(`Auto-selected Gateway from ${bestSourceChain}. Balance: ${Number(maxGatewayBalance) / 1_000_000} USDC from EOA ${eoaAddressWithBalance}`);
-      }
+      )!;
+      strategy = "same-chain";
+      estimatedFee = 0.50;
+      estimatedTime = 30;
+      useGateway = false;
+      console.log(`Auto-selected same-chain wallet ${sourceWallet.walletId} on ${destinationChain}`);
     }
 
     // Execute transfer
@@ -591,14 +589,25 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       console.log(`Initiating Gateway transfer from ${sourceWallet.chain} to ${destinationChain}`);
       
       // Step 1: Burn with EOA signature
-      // Use the depositor wallet address (the one that has the Gateway balance)
+      // Use the depositor address (the EOA that holds the Gateway balance)
+      if (!depositorAddress) {
+        return NextResponse.json(
+          {
+            error: "No Gateway depositor address resolved",
+            userMessage:
+              "Could not determine which wallet holds the Gateway balance for this transfer. Please retry or select a source wallet explicitly.",
+          },
+          { status: 500 }
+        );
+      }
+
       const { transferId, attestation, attestationSignature } = await signAndSubmitGatewayBurnIntent(
         user.id,
         amountInAtomicUnits,
         sourceWallet.chain,
         destinationChain,
         recipientAddress as Address,
-        depositorWallet.address as Address // Pass the depositor address
+        depositorAddress // Pass the depositor address
       );
       
       console.log(`Burn intent submitted. Transfer ID: ${transferId}`);
@@ -764,14 +773,20 @@ export const POST = withAuth(async (req, { user, supabase }) => {
           sourceBlockchain: sourceWallet.blockchain,
           sourceWalletAddress: sourceWallet.address,
           recipientAddress,
-          amount: amountNum.toString(),
+          amount: amountDisplay,
           token: transactionCurrency,
         });
 
         txId = sameChainSendResult.txId;
         txHash = sameChainSendResult.txHash;
 
-        if (sameChainSendResult.estimatedFee) {
+        // The send estimate is in the source chain's native gas token, which
+        // is only USDC on Arc; elsewhere it's ETH/AVAX and can't be reported
+        // as a USDC fee.
+        if (
+          sameChainSendResult.estimatedFee &&
+          sourceWallet.blockchain === "ARC-TESTNET"
+        ) {
           const parsedEstimatedFee = Number.parseFloat(
             sameChainSendResult.estimatedFee
           );
@@ -791,14 +806,17 @@ export const POST = withAuth(async (req, { user, supabase }) => {
       }
     }
 
-    // Log transaction
+    // Log transaction. Neither path returns a Circle DCW transaction id (txId
+    // is a Gateway transfer id or the App Kit tx hash/batch id), so the row is
+    // matched to its webhooks by tx_hash, not circle_transaction_id.
     await supabase.from("transactions").insert([
       {
         user_id: user.id,
         amount: amountNum,
         sender_address: sourceWallet.address,
         recipient_address: recipientAddress,
-        circle_transaction_id: txId,
+        tx_hash: txHash ?? null,
+        circle_transaction_id: null,
         blockchain: CHAIN_TO_BLOCKCHAIN[destinationChain],
         type: "OUTBOUND",
         currency: transactionCurrency,

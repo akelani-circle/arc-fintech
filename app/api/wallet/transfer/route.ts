@@ -74,8 +74,10 @@ export const POST = withAuth(async (req, { user, supabase }) => {
         amount: amountNum,
         sender_address: sourceWallet.address,
         recipient_address: destinationAddress,
+        // App Kit returns the on-chain hash (or a batch id), not a Circle DCW
+        // transaction id, so the webhook reconciles this row by tx_hash.
         tx_hash: sendResult.txHash ?? null,
-        circle_transaction_id: sendResult.txId,
+        circle_transaction_id: null,
         blockchain: sourceWallet.blockchain,
         type: "OUTBOUND",
         currency,

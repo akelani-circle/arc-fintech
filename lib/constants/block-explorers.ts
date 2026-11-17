@@ -20,5 +20,5 @@ export const BLOCK_EXPLORERS: Record<string, string> = {
   "ETH-SEPOLIA": "https://sepolia.etherscan.io",
   "BASE-SEPOLIA": "https://sepolia.basescan.org",
   "AVAX-FUJI": "https://testnet.snowtrace.io",
-  "ARC-TESTNET": "https://testnet.arcscan.app",
+  "ARC-TESTNET": "https://explorer.testnet.arc.io",
 }

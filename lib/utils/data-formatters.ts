@@ -83,6 +83,7 @@ export interface WalletDetails {
 export interface TransactionDetails {
   id: string
   amount: number
+  currency: Currency
   sender_address: string
   recipient_address?: string
   blockchain: string
@@ -109,6 +110,7 @@ export function formatTransactionDetails(tx: Partial<TransactionDetails>): Trans
   return {
     id: tx.id || '',
     amount: tx.amount || 0,
+    currency: tx.currency || 'USDC',
     sender_address: tx.sender_address || '',
     recipient_address: tx.recipient_address || '',
     blockchain: tx.blockchain || 'Unknown',
@@ -126,8 +128,12 @@ export function shortenAddress(address: string, chars: number = 6): string {
   return `${address.slice(0, chars)}...${address.slice(-chars)}`
 }
 
+/**
+ * Format a timestamp in the viewer's local time zone. The output depends on
+ * the runtime's zone, so in anything server-rendered show it through
+ * `<LocalDate>`, which waits for hydration to avoid a mismatch.
+ */
 export function formatDate(dateString: string): string {
-  if (typeof window === 'undefined') return dateString
   try {
     return new Date(dateString).toLocaleDateString("en-US", {
       month: "short",
@@ -139,13 +145,4 @@ export function formatDate(dateString: string): string {
   } catch {
     return dateString
   }
-}
-
-export function formatAmount(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(amount)
 }

@@ -40,7 +40,8 @@ import {
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { getExplorerUrl } from "@/lib/utils/data-formatters"
-import { TransactionDetails, shortenAddress, formatDate, formatAmount } from "@/lib/utils/data-formatters"
+import { TransactionDetails, shortenAddress, formatMoney } from "@/lib/utils/data-formatters"
+import { LocalDate } from "@/components/local-date"
 
 export function TransactionDetailsCard({ transaction }: { transaction: TransactionDetails }) {
   const copyToClipboard = async (text: string, label: string) => {
@@ -89,7 +90,7 @@ export function TransactionDetailsCard({ transaction }: { transaction: Transacti
         {/* Amount */}
         <div className="text-center p-6 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950/20 dark:to-purple-950/20 rounded-lg border dark:border-border">
           <div className="text-3xl font-bold text-foreground">
-            {formatAmount(transaction.amount)}
+            {formatMoney(transaction.amount, transaction.currency)}
           </div>
           <div className="flex items-center justify-center gap-2 mt-2">
             {getDirectionIcon(transaction.type)}
@@ -118,7 +119,7 @@ export function TransactionDetailsCard({ transaction }: { transaction: Transacti
                 <TableRow>
                   <TableCell className="font-medium text-muted-foreground">Amount</TableCell>
                   <TableCell className="font-mono text-sm font-semibold">
-                    {formatAmount(transaction.amount)}
+                    {formatMoney(transaction.amount, transaction.currency)}
                   </TableCell>
                 </TableRow>
                 <TableRow>
@@ -250,7 +251,7 @@ export function TransactionDetailsCard({ transaction }: { transaction: Transacti
                 <div>
                   <div className="font-medium">Created</div>
                   <div className="text-sm text-muted-foreground">
-                    {formatDate(transaction.created_at)}
+                    <LocalDate value={transaction.created_at} />
                   </div>
                 </div>
               </div>
@@ -260,7 +261,7 @@ export function TransactionDetailsCard({ transaction }: { transaction: Transacti
                   <div>
                     <div className="font-medium">Updated</div>
                     <div className="text-sm text-muted-foreground">
-                      {formatDate(transaction.updated_at)}
+                      <LocalDate value={transaction.updated_at} />
                     </div>
                   </div>
                 </div>

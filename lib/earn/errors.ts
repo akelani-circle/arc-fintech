@@ -87,3 +87,22 @@ export function getEarnError(error: unknown): EarnErrorResult {
       message || `EarnKit request failed${code !== null ? ` (code ${code})` : ""}.`,
   }
 }
+
+/** App Kit `NetworkError.TIMEOUT`. */
+const NETWORK_TIMEOUT_CODE = 3002
+
+/**
+ * The Circle transaction id of an EarnKit write that was submitted but not
+ * confirmed in time (EarnKit's own wait gave up while the batch sat in SENT).
+ * The batch can still land, so the caller must record it as pending rather
+ * than as a failure the user would retry. `null` for every other error.
+ */
+export function getUnconfirmedBatchId(error: unknown): string | null {
+  if (getErrorCode(error) !== NETWORK_TIMEOUT_CODE) return null
+  const batchId =
+    typeof error === "object" && error !== null
+      ? (error as { cause?: { trace?: { batchId?: unknown } } }).cause?.trace
+          ?.batchId
+      : undefined
+  return typeof batchId === "string" && batchId !== "" ? batchId : null
+}

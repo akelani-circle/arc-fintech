@@ -28,26 +28,19 @@ The dashboard is organized into a set of pages, each backed by Circle APIs:
 
 ## Prerequisites
 
-- **Node.js v22+** — Install via [nvm](https://github.com/nvm-sh/nvm)
-- **Supabase CLI** — Install via `npm install -g supabase` or see [Supabase CLI docs](https://supabase.com/docs/guides/cli/getting-started)
+- **Node.js v22.12+** — Install via [nvm](https://github.com/nvm-sh/nvm)
+- **Supabase CLI** — Installed with the project's dev dependencies; run it as `npx supabase` (`npm install -g supabase` is not supported). See the [Supabase CLI docs](https://supabase.com/docs/guides/cli/getting-started)
 - **Docker Desktop** (only if using the local Supabase path) — [Install Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - Circle Developer Controlled Wallets **[API key](https://console.circle.com/signin)** and **[Entity Secret](https://developers.circle.com/wallets/dev-controlled/register-entity-secret)**
-- A Circle **Kit Key** — optional for Earn, but **required for Swap and Add Funds** (see [Environment Variables](#environment-variables))
-- A **Cloudsmith auth token**, required for `npm install` to succeed — `@crcl-main/onramp-kit` is a private canary package and `npm install` 404s on the `@crcl-main` scope without it (see [Getting Started](#getting-started))
+- A Circle **Kit Key** — optional for Earn, but **required for Swap** (see [Environment Variables](#environment-variables))
 
 ## Getting Started
 
 1. Clone the repository and install dependencies:
 
-   `@crcl-main/onramp-kit` (used by Add Funds) is a private canary package; add this line to your **personal** `~/.npmrc` first, or `npm install` 404s on the `@crcl-main` scope:
-
-   ```
-   //npm.cloudsmith.io/circle/common-private/:_authToken=<your-cloudsmith-token>
-   ```
-
    ```bash
-   git clone git@github.com:akelani-circle/fintech-starter.git
-   cd fintech-starter
+   git clone https://github.com/circlefin/arc-fintech.git
+   cd arc-fintech
    npm install
    ```
 
@@ -106,7 +99,7 @@ The dashboard is organized into a set of pages, each backed by Circle APIs:
 - Uses [Circle Gateway](https://developers.circle.com/gateway) for a unified, cross-chain USDC balance
 - Utilizes `@circle-fin/app-kit` for bridging assets across supported chains (`kit.bridge` / `kit.estimateBridge`) and for swapping USDC ⇄ EURC on Arc Testnet (`kit.swap` / `kit.estimateSwap`)
 - Uses `@circle-fin/earn-kit` to discover USDC vaults on Arc Testnet, deposit, withdraw, and track positions
-- Uses `@crcl-main/onramp-kit` for Add Funds: the server mints a single-use session (`/api/onramp/session`) for a wallet the caller owns, and the browser opens Circle's hosted onramp widget in a popup with that session. Sandbox-only — see [Environment Variables](#environment-variables)
+- Uses `@circle-fin/onramp-kit` for Add Funds: the server mints a single-use session (`/api/onramp/session`) for a wallet the caller owns, and the browser opens Circle's hosted onramp widget in a popup with that session. Sandbox-only — see [Environment Variables](#environment-variables)
 - Uses Circle's [Compliance Engine](https://developers.circle.com/w3s/compliance-engine) to screen addresses before transfers
 - [Circle webhooks](https://developers.circle.com/api-reference/webhook-endpoints) keep transaction and [Gateway](https://developers.circle.com/gateway/webhooks) state in sync (see [Webhooks & Real-Time Updates](#webhooks--real-time-updates))
 - Real-time UI updates powered by Supabase Realtime subscriptions
@@ -126,6 +119,8 @@ ngrok http 3000
 
 The app uses two subscriptions (both routed to the same handler): a standard Developer-Controlled Wallets subscription at `/api/circle/webhook` for `transactions.*` events, and a permissionless Gateway subscription at `/api/circle/gateway-webhook` for `gateway.deposit.finalized`. Circle requires a unique endpoint URL per subscription, which is why the Gateway subscription uses a distinct path. New wallet addresses are registered on the Gateway subscription automatically when wallets are created; `npm run webhooks:register` backfills addresses for wallets that already exist.
 
+The standard subscription is not created by the app. Add it yourself on the Circle Console's Webhooks page, with your `WEBHOOK_ENDPOINT_URL` as the endpoint, and make sure it is **enabled**. A disabled subscription delivers nothing, so transfers stay `PENDING` and inbound deposits never show up.
+
 A settled Add Funds purchase is meant to arrive as `onramp.deposit.settled` on the standard DCW subscription above. That notification type is enabled per-subscription in the Circle Console, not by `npm run webhooks:register` — turn it on there or no onramp deposit is ever recorded.
 
 ## Environment Variables
@@ -142,7 +137,7 @@ SUPABASE_SECRET_KEY=your-secret-key
 CIRCLE_API_KEY=your-circle-api-key
 CIRCLE_ENTITY_SECRET=your-circle-entity-secret
 
-# Circle Kit Key (shared by Earn, Swap, and Add Funds; required for Swap and Add Funds)
+# Circle Kit Key (shared by Earn and Swap; required for Swap)
 KIT_KEY=KIT_KEY:<keyId>:<keySecret>
 
 # Add Funds (Onramp Kit) sandbox endpoints — keep these set, see table below
@@ -162,16 +157,15 @@ ARC_TESTNET_RPC_KEY=
 | `NEXT_PUBLIC_SUPABASE_URL` | Public | Supabase project URL. |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Public | Supabase publishable key. |
 | `SUPABASE_SECRET_KEY` | Server-side | Supabase secret key for admin operations. |
-| `CIRCLE_API_KEY` | Server-side | Circle API key for wallet operations, compliance screening, and webhook subscription management. |
+| `CIRCLE_API_KEY` | Server-side | Circle API key for wallet operations, compliance screening, webhook subscription management, and Add Funds (the Onramp Kit's `apiKey`). Must be a testnet key (`TEST_API_KEY:…`), matching the onramp sandbox endpoints below. |
 | `CIRCLE_ENTITY_SECRET` | Server-side | Circle entity secret for signing transactions. |
-| `KIT_KEY` | Server-side | Circle Kit Key, shared by EarnKit, App Kit Swap, and Onramp Kit (Add Funds). **Optional for Earn** — it runs permissionlessly without one. **Required for Swap and Add Funds** — the Stablecoin Service rejects an empty kit key for Swap, and the onramp session route throws without one. Setting it also enables integrator attribution and higher rate limits. Must be a **sandbox** key: a key is bound to one environment and the other rejects it. Get a free key from the Circle Console. Format: `KIT_KEY:<keyId>:<keySecret>`. |
+| `KIT_KEY` | Server-side | Circle Kit Key, shared by EarnKit and App Kit Swap. **Optional for Earn** — it runs permissionlessly without one. **Required for Swap** — the Stablecoin Service rejects an empty kit key. Setting it also enables integrator attribution and higher rate limits. Get a free key from the Circle Console. Format: `KIT_KEY:<keyId>:<keySecret>`. |
 | `ONRAMP_API_BASE_URL` | Server-side | Add Funds sandbox API endpoint (`https://api-test.circle.com`). Unset, empty, or whitespace all mean the kit's production default — real money, on mainnet — so this app refuses to mint an onramp session unless it's set. Must always match `NEXT_PUBLIC_ONRAMP_WIDGET_BASE_URL`'s environment. |
 | `NEXT_PUBLIC_ONRAMP_WIDGET_BASE_URL` | Public | Add Funds sandbox widget origin (`https://onramp-sandbox.arc.io`). Same unset-means-production rule as `ONRAMP_API_BASE_URL`, which it must match. Inlined at build time — restart `npm run dev` after changing it. |
-| `WEBHOOK_ENDPOINT_URL` | Server-side | Public HTTPS URL Circle posts notifications to (e.g. your ngrok tunnel + `/api/circle/webhook`). Used to create/sync the standard and Gateway webhook subscriptions. If unset, falls back to `${NEXT_PUBLIC_APP_URL}/api/circle/webhook` and registration is skipped when neither is set. |
+| `WEBHOOK_ENDPOINT_URL` | Server-side | Public HTTPS URL Circle posts notifications to (e.g. your ngrok tunnel + `/api/circle/webhook`). Point your standard Console subscription at it; the Gateway subscription's endpoint is derived from it. If unset, falls back to `${NEXT_PUBLIC_APP_URL}/api/circle/webhook` and registration is skipped when neither is set. |
 | `GATEWAY_WEBHOOK_ENDPOINT_URL` | Server-side | Optional. Dedicated endpoint for the Gateway *permissionless* subscription. Circle requires a unique URL per subscription, so this must differ from `WEBHOOK_ENDPOINT_URL`. If unset, it is derived by swapping the path to `/api/circle/gateway-webhook`. |
 | `NEXT_PUBLIC_APP_URL` | Public | Optional. Base URL of the deployed app, used as a fallback to derive the webhook endpoints when `WEBHOOK_ENDPOINT_URL` / `GATEWAY_WEBHOOK_ENDPOINT_URL` are unset. Not required for local development when `WEBHOOK_ENDPOINT_URL` is set. |
 | `ARC_TESTNET_RPC_KEY` | Server-side | Optional. API key for Arc Testnet RPC reads; without it, a rate-limited public RPC is used. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-side | Only needed by the `npm run webhooks:register` backfill script, which reads wallet addresses directly. The app itself uses `SUPABASE_SECRET_KEY`. |
 
 ## User Accounts
 

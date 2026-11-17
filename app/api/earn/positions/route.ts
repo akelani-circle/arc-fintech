@@ -18,6 +18,7 @@ import { sumEarnHoldingsOnChain, type EarnHoldingPair } from "@/lib/circle/earn-
 import { resolveEarnWalletAddresses } from "@/lib/earn/resolve-wallet"
 import { EARN_BLOCKCHAIN } from "@/lib/circle/earn-kit"
 import type { EarnPositionsResponse } from "@/lib/earn/types"
+import { settlePendingEarnWrites } from "@/lib/earn/settle-pending"
 
 // Bounded so a caller cannot fan reads out over an unbounded vault list; the
 // list page fetches a single page of vaults, well under this cap.
@@ -43,6 +44,10 @@ const bodySchema = z.object({
 export const POST = withAuth(async (req, { user, supabase }) => {
   const parsed = await validateJsonBody(req, bodySchema)
   if (!parsed.ok) return parsed.response
+
+  // Settle Earn writes whose confirming webhook never arrived, so positions
+  // and Activity reflect them.
+  await settlePendingEarnWrites(supabase, user.id)
 
   const vaultSet = new Set(parsed.data.vaults.map((v) => v.toLowerCase()))
   const walletSet = new Set(

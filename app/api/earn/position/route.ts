@@ -16,6 +16,7 @@ import { validateQuery, evmAddressSchema } from "@/lib/api/validate"
 import { withAuth } from "@/lib/api/with-auth"
 import { getEarnPosition, getEarnError } from "@/lib/circle/earn-ops"
 import { resolveEarnWallet } from "@/lib/earn/resolve-wallet"
+import { settlePendingEarnWrites } from "@/lib/earn/settle-pending"
 
 const querySchema = z.object({
   walletId: z.string().min(1),
@@ -32,6 +33,10 @@ export const GET = withAuth(async (req, { user, supabase }) => {
   if (!wallet.ok) {
     return NextResponse.json({ error: wallet.error }, { status: wallet.status })
   }
+
+  // Settle Earn writes whose confirming webhook never arrived, so positions
+  // and Activity reflect them.
+  await settlePendingEarnWrites(supabase, user.id)
 
   try {
     const position = await getEarnPosition(wallet.address, vaultAddress)

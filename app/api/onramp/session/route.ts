@@ -15,7 +15,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createOnrampServerKit, type OnrampServerKit } from "@crcl-main/onramp-kit/server";
+import { createOnrampServerKit, type OnrampServerKit } from "@circle-fin/onramp-kit/server";
 import { createClient } from "@/lib/supabase/server";
 import { DB_BLOCKCHAIN_TO_ONRAMP_CHAIN } from "@/lib/circle/onramp-chains";
 import { ONRAMP_WIDGET_BASE_URL } from "@/lib/circle/onramp-environment";
@@ -26,8 +26,8 @@ import {
 } from "@/lib/circle/onramp-server-environment";
 
 // Constructed lazily (not at module scope): createOnrampServerKit validates
-// kitKey eagerly and throws if it's missing, which would otherwise break
-// Next's build-time page-data collection whenever KIT_KEY isn't set. The
+// apiKey eagerly and throws if it's missing, which would otherwise break
+// Next's build-time page-data collection whenever CIRCLE_API_KEY isn't set. The
 // environment assertion runs here for the same reason.
 let server: OnrampServerKit | undefined;
 
@@ -38,11 +38,16 @@ function getServer(): OnrampServerKit {
     assertOnrampSandbox();
 
     server = createOnrampServerKit({
-      kitKey: process.env.KIT_KEY!,
+      apiKey: process.env.CIRCLE_API_KEY!,
       // Passed through verbatim. Undefined would leave the kit on its own
       // production defaults, which assertOnrampSandbox has just ruled out.
       baseUrl: ONRAMP_API_BASE_URL,
       widgetBaseUrl: ONRAMP_WIDGET_BASE_URL,
+      // A construction option, not a per-session parameter: it's sealed into
+      // the session JWT and handed to the widget host as a `frame-ancestors`
+      // CSP claim, so it must never come from the client. resolveReferrerDomain
+      // derives it from the same server-side config the webhook URL comes from.
+      referrerDomain: resolveReferrerDomain(),
     });
   }
   return server;
@@ -103,17 +108,11 @@ export async function POST(req: NextRequest) {
     }
 
     // Every session parameter is derived server-side; nothing from the request
-    // body is forwarded. `referrerDomain` in particular is never taken from the
-    // client: it's sealed into the session JWT and handed to the widget host as
-    // a `frame-ancestors` CSP claim, so a caller-supplied value would let them
-    // widen that allowlist to a domain of their choosing. resolveReferrerDomain
-    // derives it instead, from the same server-side config the Gateway webhook
-    // URL already comes from.
+    // body is forwarded.
     const session = await getServer().createSession({
-      userId: user.id, // never trust a client-supplied userId
+      appUserId: user.id, // never trust a client-supplied user id
       destinationAddress: wallet.address,
       destinationChain,
-      referrerDomain: resolveReferrerDomain(),
     });
 
     return NextResponse.json(session, {

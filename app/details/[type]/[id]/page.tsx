@@ -17,7 +17,7 @@
  */
 
 import { Metadata } from "next"
-import { notFound } from "next/navigation"
+import { notFound, unstable_rethrow } from "next/navigation"
 import React, { Suspense } from "react"
 import { createClient } from "@/lib/supabase/server"
 import { BackButton } from "@/components/back-button"
@@ -122,6 +122,10 @@ async function AsyncDetailsContent({ params }: { params: Promise<{ type: string;
     const { type, id } = await params
     data = await getDetailsData(type, id)
   } catch (error) {
+    // Let Next's own control-flow errors through: notFound(), and the
+    // HANGING_PROMISE_REJECTION `params`/cookies() raise when the build-time
+    // prerender ends. Catching those only spammed the build log.
+    unstable_rethrow(error)
     console.error("Error loading details:", error)
     notFound()
   }

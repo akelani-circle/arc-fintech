@@ -18,10 +18,16 @@ import {
 import { APP_KIT_CHAIN_BY_BLOCKCHAIN, type AppKitChain } from "@/lib/constants/chains";
 import { CHAIN_TO_EURC_ADDRESS } from "@/lib/constants/eurc-addresses";
 import type { Currency } from "@/lib/constants/currency";
+import { formatUnits } from "viem";
 
 const NETWORK_TIMEOUT = 3002;
 const BALANCE_INSUFFICIENT_TOKEN = 9001;
 const BALANCE_INSUFFICIENT_GAS = 9002;
+
+// estimateSend reports its fee in the native gas token's smallest unit (wei).
+// Every supported chain's native token has 18 decimals: ETH, AVAX, and USDC
+// on Arc (whose ERC-20 interface uses 6, but native accounting uses 18).
+const NATIVE_TOKEN_DECIMALS = 18;
 
 interface SendKitLike {
   estimateSend(params: SendParams): Promise<{ fee: string }>;
@@ -74,6 +80,10 @@ export interface AppKitSendInput {
 export interface AppKitSendResult {
   txId: string;
   txHash?: string;
+  /**
+   * Estimated network fee as a decimal amount of the source chain's native
+   * gas token (USDC on Arc, ETH/AVAX elsewhere), e.g. "0.0078".
+   */
   estimatedFee?: string;
 }
 
@@ -195,7 +205,7 @@ export async function sendUsdcOnSameChainWithAppKit(
   return {
     txId: normalized.txId,
     txHash: normalized.txHash,
-    estimatedFee: estimate.fee,
+    estimatedFee: formatUnits(BigInt(estimate.fee), NATIVE_TOKEN_DECIMALS),
   };
 }
 

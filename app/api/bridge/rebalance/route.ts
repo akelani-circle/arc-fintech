@@ -16,6 +16,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { randomUUID } from "node:crypto";
+import type { AppKitActions } from "@circle-fin/app-kit";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAppKit, getCircleWalletsAdapter } from "@/lib/circle/app-kit";
@@ -74,8 +76,9 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       transferSpeed,
     } = parsed.data;
 
-    // App Kit expects amount in human-readable decimal format
-    const amountString = amountNum.toFixed(2);
+    // App Kit expects amount in human-readable decimal format. Estimate at
+    // USDC precision (6 decimals), same as the estimate route.
+    const amountString = amountNum.toFixed(6);
     let estimatedBridgeFee = 0;
 
     // Map chains to App Kit format
@@ -282,7 +285,14 @@ export const POST = withAuth(async (request, { user, supabase }) => {
       signalBurn = resolve;
     });
 
-    kit.on("bridge.burn", async (payload) => {
+    // `kit` is a shared singleton, and every kit.bridge() call picks up every
+    // handler registered on it at that moment. So tag this transfer with its
+    // own traceId, have the handlers skip events from other transfers, and
+    // remove them once this transfer settles so they don't pile up.
+    const traceId = randomUUID();
+
+    const onBurn = async (payload: AppKitActions["bridge.burn"]) => {
+      if (payload.traceId !== traceId) return;
       const hash = extractTxHash(payload);
       if (hash && !burnTxHash) {
         burnTxHash = hash;
@@ -292,12 +302,16 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           .eq("id", txData.id);
         signalBurn();
       }
-    });
+    };
 
-    kit.on("bridge.mint", async (payload) => {
+    const onMint = (payload: AppKitActions["bridge.mint"]) => {
+      if (payload.traceId !== traceId) return;
       const hash = extractTxHash(payload);
       if (hash) mintTxHash = hash;
-    });
+    };
+
+    kit.on("bridge.burn", onBurn);
+    kit.on("bridge.mint", onMint);
 
     // Run the bridge to completion in the background. Its resolution updates the
     // row to its terminal state and is best-effort: in a serverless deploy the
@@ -317,6 +331,7 @@ export const POST = withAuth(async (request, { user, supabase }) => {
         config: {
           transferSpeed: transferSpeed as "FAST" | "SLOW",
         },
+        invocationMeta: { traceId },
       })
       .then(async (result) => {
         if (!burnTxHash && result.steps && Array.isArray(result.steps)) {
@@ -349,8 +364,6 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           console.error("Failed to update transaction:", updateError);
         }
 
-        // Unblock the responder even if the burn event never fired on its own.
-        signalBurn();
         return { ok: true as const, result };
       })
       .catch(async (bridgeError: AppKitError) => {
@@ -361,8 +374,14 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           .update({ status: "FAILED", tx_hash: burnTxHash })
           .eq("id", txData.id);
 
-        signalBurn();
+        // No signalBurn() here (or on success above): the race below already
+        // waits on settlement, and signalling a burn that never happened made
+        // a pre-burn failure answer 202 PENDING instead of the error.
         return { ok: false as const, error: bridgeError };
+      })
+      .finally(() => {
+        kit.off("bridge.burn", onBurn);
+        kit.off("bridge.mint", onMint);
       });
 
     // Respond as soon as EITHER the burn is broadcast (common: reply 202
@@ -381,11 +400,13 @@ export const POST = withAuth(async (request, { user, supabase }) => {
         const bridgeError = s.error;
         // Map common App Kit errors to friendlier messages.
         let userMessage = bridgeError?.message || "Bridge transfer failed";
-        if (bridgeError?.code === 9002 || bridgeError?.type === "BALANCE") {
+        // Both codes share type "BALANCE", so match on the code.
+        if (bridgeError?.code === 9001) {
+          userMessage =
+            "Not enough USDC in the source wallet to cover the amount plus fees.";
+        } else if (bridgeError?.code === 9002) {
           userMessage =
             "Insufficient source-chain gas. Ensure the source wallet has native currency for gas fees.";
-        } else if (bridgeError?.code === 9001) {
-          userMessage = "Not enough USDC in the source wallet.";
         }
 
         return NextResponse.json(
