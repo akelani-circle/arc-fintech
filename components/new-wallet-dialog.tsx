@@ -50,7 +50,6 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
-import { createClient } from "@/lib/supabase/client"
 import { WalletCreatedDialog, type CreatedWalletData } from "@/components/wallet-created-dialog"
 
 const walletCreationFormSchema = z.object({
@@ -83,8 +82,6 @@ export function NewWalletDialog({
   const [createdWallet, setCreatedWallet] = React.useState<CreatedWalletData | null>(null)
   const [isLoading, setIsLoading] = React.useState(false)
 
-  const supabase = createClient()
-
   const walletCreationForm = useForm<z.infer<typeof walletCreationFormSchema>>({
     resolver: zodResolver(walletCreationFormSchema),
     defaultValues: {
@@ -110,9 +107,6 @@ export function NewWalletDialog({
   const onSubmit = async (values: z.infer<typeof walletCreationFormSchema>) => {
     setIsLoading(true)
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error("User not authenticated")
-
       // The server now derives (or reuses) the Circle wallet set itself, so
       // the client only sends the chain and a display name. Sending the
       // walletSetId from the client was unsafe (one user could nominate
@@ -123,23 +117,14 @@ export function NewWalletDialog({
         body: JSON.stringify({
           name: values.name,
           blockchain: values.chain,
+          type: values.type,
         }),
       })
 
+      // The route also saves the wallet row, so it exists even if this page
+      // goes away before the response arrives.
       if (!walletResponse.ok) throw new Error("Failed to create wallet")
       const wallet = await walletResponse.json()
-
-      // Save to Supabase
-      const { error: dbError } = await supabase.from("wallets").insert({
-        user_id: user.id,
-        name: values.name,
-        circle_wallet_id: wallet.id,
-        address: wallet.address,
-        blockchain: values.chain,
-        type: values.type,
-      })
-
-      if (dbError) throw dbError
 
       setCreatedWallet({
         name: values.name,

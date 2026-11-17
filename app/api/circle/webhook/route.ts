@@ -23,6 +23,14 @@ import {
   buildOnrampTransactionRow,
   type OnrampDepositNotification,
 } from "@/lib/circle/onramp-deposit";
+import {
+  currencyFromTokenSymbol,
+  getWebhookEventId,
+  statusesReplaceableBy,
+  toTransactionStatus,
+  type TransactionStatus,
+} from "@/lib/circle/webhook-events";
+import type { Currency } from "@/lib/constants/currency";
 
 // Fail fast at module load if the webhook's required env vars aren't
 // configured. This is a secret-key + public-URL pair: missing either
@@ -55,6 +63,9 @@ type CircleNotification = {
 };
 
 interface CircleWebhookPayload {
+  // Unique per notification (one per state change), and stable across
+  // Circle's delivery retries. The dedupe key — see getWebhookEventId.
+  notificationId?: string;
   notificationType: string;
   notification: CircleNotification;
   [k: string]: unknown;
@@ -97,6 +108,8 @@ type TransactionNotification = {
   destinationAddress?: string;
   // Decimal token amounts as strings, e.g. ["0.01"] for 0.01 USDC.
   amounts?: string[];
+  // Circle token id; resolved to a symbol with resolveTokenCurrency.
+  tokenId?: string;
   transactionType?: string;
 };
 
@@ -152,6 +165,38 @@ async function getCirclePublicKey(keyId: string) {
   ].join("\n");
 }
 
+// Circle token id -> currency (or null for tokens we don't model). Token
+// records never change, so a process-lifetime cache is safe.
+const tokenCurrencyCache = new Map<string, Currency | null>();
+
+/**
+ * Resolve a DCW notification's `tokenId` to the currency the row should be
+ * labelled with. Throws on a lookup failure so the delivery is retried rather
+ * than recorded under the wrong currency.
+ */
+async function resolveTokenCurrency(tokenId: string): Promise<Currency | null> {
+  const cached = tokenCurrencyCache.get(tokenId);
+  if (cached !== undefined) return cached;
+
+  if (!process.env.CIRCLE_API_KEY) throw new Error("Circle API key is not set");
+  const response = await fetch(
+    `https://api.circle.com/v1/w3s/tokens/${encodeURIComponent(tokenId)}`,
+    {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${process.env.CIRCLE_API_KEY}`,
+      },
+    }
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to look up token ${tokenId}: ${response.status}`);
+  }
+  const data = await response.json();
+  const currency = currencyFromTokenSymbol(data?.data?.token?.symbol);
+  tokenCurrencyCache.set(tokenId, currency);
+  return currency;
+}
+
 /**
  * Apply a `transactions.inbound` / `transactions.outbound` state change to the
  * matching transaction row, matching by `circle_transaction_id` first and then
@@ -167,16 +212,10 @@ async function applyTransactionStateChange(
   notificationType: string
 ): Promise<void> {
   // The transaction_status enum only contains PENDING, CONFIRMED, COMPLETE,
-  // FAILED. Anything outside that maps to a no-op.
-  const allowedStates = ["PENDING", "CONFIRMED", "COMPLETE", "FAILED"] as const;
-  type AllowedState = (typeof allowedStates)[number];
-  const newStatus: AllowedState | null = (allowedStates as readonly string[]).includes(
-    notification.state
-  )
-    ? (notification.state as AllowedState)
-    : null;
+  // FAILED. In-flight states (QUEUED, SENT, ...) map to a no-op.
+  const newStatus = toTransactionStatus(notification.state);
 
-  if (notification.state === "FAILED") {
+  if (newStatus === "FAILED") {
     console.error(
       `Transaction ${notification.id} FAILED on chain. Reason: ${notification.errorReason ?? "unknown"}`
     );
@@ -193,19 +232,30 @@ async function applyTransactionStateChange(
     updatePayload.tx_hash = txHash;
   }
 
-  // Single-pass update. We try matching by circle_transaction_id first
-  // (the common case), and if no rows match and we have a tx_hash, also
-  // try matching REBALANCE/OUTBOUND rows by tx_hash.
+  // Only move a row forward: Circle doesn't promise delivery order, so a late
+  // CONFIRMED must not overwrite a COMPLETE.
+  const replaceable = statusesReplaceableBy(newStatus);
+
+  // We try matching by circle_transaction_id first (the common case), and if
+  // no rows match and we have a tx_hash, also try matching
+  // REBALANCE/OUTBOUND/SWAP/EARN_* rows by tx_hash.
   const { data: stdRows, error: stdErr } = await supabaseAdmin
     .from("transactions")
-    .update(updatePayload)
-    .eq("circle_transaction_id", notification.id)
-    .select("id");
+    .select("id, status")
+    .eq("circle_transaction_id", notification.id);
 
   if (stdErr) {
-    console.error("Supabase update error (standard):", stdErr);
+    console.error("Supabase lookup error (standard):", stdErr);
   }
-  if ((stdRows?.length ?? 0) > 0) return;
+  if ((stdRows?.length ?? 0) > 0) {
+    const { error } = await supabaseAdmin
+      .from("transactions")
+      .update(updatePayload)
+      .eq("circle_transaction_id", notification.id)
+      .in("status", replaceable);
+    if (error) console.error("Supabase update error (standard):", error);
+    return;
+  }
 
   if (txHash) {
     // Fallback: match by tx_hash. We use this for rows that were inserted
@@ -214,17 +264,28 @@ async function applyTransactionStateChange(
     // all of which return only the on-chain hash, not the underlying DCW
     // transaction id. Without SWAP here, a swap left PENDING at execution time
     // could never be reconciled to CONFIRMED/FAILED by any code path.
+    // EARN_* too: a withdrawal's USDC arrives as transactions.inbound under
+    // the same hash, and without a match it was recorded again as INBOUND.
+    const fallbackTypes = ["REBALANCE", "OUTBOUND", "SWAP", "EARN_DEPOSIT", "EARN_WITHDRAW"];
     const { data: rebalRows, error: rebalErr } = await supabaseAdmin
       .from("transactions")
-      .update(updatePayload)
+      .select("id")
       .eq("tx_hash", txHash)
-      .in("type", ["REBALANCE", "OUTBOUND", "SWAP"])
-      .select("id");
+      .in("type", fallbackTypes);
 
     if (rebalErr) {
-      console.error("Supabase update error (tx_hash fallback):", rebalErr);
+      console.error("Supabase lookup error (tx_hash fallback):", rebalErr);
     }
-    if ((rebalRows?.length ?? 0) > 0) return;
+    if ((rebalRows?.length ?? 0) > 0) {
+      const { error } = await supabaseAdmin
+        .from("transactions")
+        .update(updatePayload)
+        .eq("tx_hash", txHash)
+        .in("type", fallbackTypes)
+        .in("status", replaceable);
+      if (error) console.error("Supabase update error (tx_hash fallback):", error);
+      return;
+    }
   }
 
   // Nothing matched. For an *inbound* transfer this is expected the first
@@ -232,7 +293,10 @@ async function applyTransactionStateChange(
   // so the app never wrote a row for it. Record one now so the dashboard's
   // Realtime subscription fires and balances refresh. (Outbound/rebalance
   // misses are left alone — their originating API call simply hasn't written
-  // its row yet, and a later webhook will reconcile by id/tx_hash.)
+  // its row yet. On Arc that is common: the transaction is final before the
+  // route inserts. The `apply_early_webhook_state` trigger applies the stored
+  // webhook_events state when the row arrives, and drops an INBOUND row this
+  // handler recorded for the same transfer in the meantime.)
   if (notificationType === "transactions.inbound") {
     await insertInboundTransfer(
       notification as unknown as TransactionNotification,
@@ -243,14 +307,16 @@ async function applyTransactionStateChange(
 
 /**
  * Record an externally-initiated inbound USDC transfer the app never wrote a
- * row for. Upserts on `circle_transaction_id` (a UNIQUE column) so concurrent
+ * row for. Inserts on `circle_transaction_id` (a UNIQUE column) so concurrent
  * webhook deliveries for the same transfer converge on one row rather than
- * duplicating it. The insert/update is what triggers the dashboard refresh —
+ * duplicating it; a delivery that loses that race applies its state as a
+ * forward-only update instead. The insert/update is what triggers the
+ * dashboard refresh —
  * see `onTransactionChange` in `lib/contexts/balance-context.tsx`.
  */
 async function insertInboundTransfer(
   notification: TransactionNotification,
-  status: string
+  status: TransactionStatus
 ): Promise<void> {
   const recipient = (notification.destinationAddress || "").toLowerCase();
   if (!recipient) {
@@ -287,11 +353,26 @@ async function insertInboundTransfer(
     return;
   }
 
+  // The currency column defaults to USDC, so it has to be set from the
+  // token: an EURC deposit would otherwise show as dollars. Tokens the app
+  // doesn't model (e.g. Earn vault shares) aren't balances it tracks, so they
+  // get no row rather than a mislabelled one.
+  const currency = notification.tokenId
+    ? await resolveTokenCurrency(notification.tokenId)
+    : null;
+  if (!currency) {
+    console.warn(
+      `transactions.inbound for unsupported token ${notification.tokenId ?? "(none)"}; skipping insert`,
+      notification.id
+    );
+    return;
+  }
+
   // `amounts` is an array of decimal token strings; for a USDC transfer there
   // is a single entry.
   const amount = Number(notification.amounts?.[0] ?? 0);
 
-  const { error: upsertErr } = await supabaseAdmin
+  const { data: inserted, error: upsertErr } = await supabaseAdmin
     .from("transactions")
     .upsert(
       {
@@ -303,13 +384,28 @@ async function insertInboundTransfer(
         circle_transaction_id: notification.id,
         blockchain,
         type: "INBOUND",
+        currency,
         status,
       },
-      { onConflict: "circle_transaction_id" }
-    );
+      { onConflict: "circle_transaction_id", ignoreDuplicates: true }
+    )
+    .select("id");
 
   if (upsertErr) {
     console.error("Inbound transfer upsert error:", upsertErr);
+    return;
+  }
+  if ((inserted?.length ?? 0) > 0) return;
+
+  // A concurrent delivery for the same transfer inserted the row first.
+  const { error: updateErr } = await supabaseAdmin
+    .from("transactions")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("circle_transaction_id", notification.id)
+    .in("status", statusesReplaceableBy(status));
+
+  if (updateErr) {
+    console.error("Inbound transfer update error:", updateErr);
   }
 }
 
@@ -496,14 +592,15 @@ export async function POST(req: NextRequest) {
     // again. This replaces the previous in-handler 30s retry loop, which
     // both blocked the response and could double-apply state on retries.
     //
-    // The previous schema also wrote `circle_transaction_id: notification.id`
-    // alongside `notification_id`. That was a holdover from when the two
-    // fields meant different things; today they're identical, so we only
-    // store `notification_id`.
+    // The key is the per-notification id, not `notification.id`: the latter
+    // is the transaction id, shared by every state change Circle sends for
+    // that transaction, so deduping on it dropped all updates after the first.
+    const eventId = getWebhookEventId(body);
     const { error: insertErr } = await supabaseAdmin
       .from("webhook_events")
       .insert({
-        notification_id: notification.id,
+        notification_id: eventId,
+        circle_transaction_id: notification.id,
         notification_type: notificationType,
         state: notification.state,
         payload: body as unknown as Record<string, unknown>,
@@ -527,49 +624,47 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (
-      notificationType === "transactions.outbound" ||
-      notificationType === "transactions.inbound"
-    ) {
-      await applyTransactionStateChange(notification, notificationType);
-    } else if (notificationType === "gateway.deposit.finalized") {
-      // Gateway events carry a different payload shape than transactions.*
-      // (depositor address, domain, on-chain txHash) — see the typed handler.
-      await applyGatewayDeposit(
-        notification as unknown as GatewayDepositNotification
-      );
-    } else if (notificationType === "onramp.deposit.settled") {
-      try {
+    try {
+      if (
+        notificationType === "transactions.outbound" ||
+        notificationType === "transactions.inbound"
+      ) {
+        await applyTransactionStateChange(notification, notificationType);
+      } else if (notificationType === "gateway.deposit.finalized") {
+        // Gateway events carry a different payload shape than transactions.*
+        // (depositor address, domain, on-chain txHash) — see the typed handler.
+        await applyGatewayDeposit(
+          notification as unknown as GatewayDepositNotification
+        );
+      } else if (notificationType === "onramp.deposit.settled") {
         await applyOnrampDeposit(
           notification as unknown as OnrampDepositNotification
         );
-      } catch (applyErr) {
-        // The dedupe row was written *before* the side effects ran, so leaving
-        // it in place makes Circle's retries ack as duplicates and drop the
-        // event for good. The handlers above can survive that — their rows
-        // already exist and get reconciled later — but an onramp deposit has no
-        // other record anywhere, so losing it means money arrived and the app
-        // never knows. Release the dedupe row and 500 so the retry gets a real
-        // second attempt.
-        console.error("Failed to apply onramp deposit:", applyErr);
+      }
+    } catch (applyErr) {
+      // The dedupe row was written *before* the side effects ran, so leaving
+      // it in place makes Circle's retries ack as duplicates and drop the
+      // event for good. Release it and 500 so the retry gets a real second
+      // attempt. Handlers only throw for transient failures (a failed lookup
+      // or write), never for a payload that a retry would deliver unchanged.
+      console.error(`Failed to apply ${notificationType}:`, applyErr);
 
-        const { error: releaseErr } = await supabaseAdmin
-          .from("webhook_events")
-          .delete()
-          .eq("notification_id", notification.id);
+      const { error: releaseErr } = await supabaseAdmin
+        .from("webhook_events")
+        .delete()
+        .eq("notification_id", eventId);
 
-        if (releaseErr) {
-          console.error(
-            "Failed to release webhook dedupe row; this deposit will not be retried:",
-            releaseErr
-          );
-        }
-
-        return NextResponse.json(
-          { error: "Failed to apply onramp deposit" },
-          { status: 500 }
+      if (releaseErr) {
+        console.error(
+          "Failed to release webhook dedupe row; this event will not be retried:",
+          releaseErr
         );
       }
+
+      return NextResponse.json(
+        { error: `Failed to apply ${notificationType}` },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ received: true }, { status: 200 });

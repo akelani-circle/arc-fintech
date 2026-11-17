@@ -22,21 +22,27 @@ import {
   formatComplianceResponse,
   mapComplianceResult,
 } from '@/lib/compliance/utils';
-import { ComplianceCheckRequest } from '@/types/compliance';
 import { withAuth } from '@/lib/api/with-auth';
+import {
+  blockchainSchema,
+  evmAddressSchema,
+  validateJsonBody,
+} from '@/lib/api/validate';
+import { z } from 'zod';
+
+// Every wallet this app manages is an EVM address on one of the supported
+// testnets, so reject anything else before spending a Circle API call (and a
+// compliance_logs row) on it.
+const bodySchema = z.object({
+  address: evmAddressSchema,
+  chain: blockchainSchema,
+});
 
 export const POST = withAuth(async (req, { user, supabase }) => {
   try {
-    const body: ComplianceCheckRequest = await req.json();
-    const { address, chain } = body;
-
-    // Validate input
-    if (!address || !chain) {
-      return NextResponse.json(
-        { error: 'Address and chain are required' },
-        { status: 400 }
-      );
-    }
+    const parsed = await validateJsonBody(req, bodySchema);
+    if (!parsed.ok) return parsed.response;
+    const { address, chain } = parsed.data;
 
     // Call Circle's screening API
     const circleResponse = await screenAddress(address, chain);

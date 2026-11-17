@@ -220,12 +220,15 @@ async function main() {
   loadEnvFiles();
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // Same admin key the app uses. SUPABASE_SERVICE_ROLE_KEY (the legacy name)
+  // is still accepted so existing .env.local files keep working.
+  const serviceRoleKey =
+    process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
   const apiKey = process.env.CIRCLE_API_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
     console.error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY; cannot read wallets."
+      "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SECRET_KEY; cannot read wallets."
     );
     process.exit(1);
   }

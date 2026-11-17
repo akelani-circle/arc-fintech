@@ -101,8 +101,9 @@ describe("sendUsdcOnSameChainWithAppKit", () => {
   it("calls estimateSend and send with constructed params", async () => {
     const estimateSend = vi.fn().mockResolvedValue({
       gas: BigInt(21000),
-      gasPrice: BigInt(100),
-      fee: "0.00042",
+      gasPrice: BigInt(20_000_000_000),
+      // estimateSend reports wei; the result is in whole native tokens.
+      fee: "420000000000000",
     });
     const send = vi.fn().mockResolvedValue({
       name: "send",
@@ -171,7 +172,7 @@ describe("sendUsdcOnSameChainWithAppKit", () => {
       return {
         gas: BigInt(21000),
         gasPrice: BigInt(100),
-        fee: "0.00001",
+        fee: "2100000",
       };
     });
     const send = vi.fn().mockImplementation(async (params) => {

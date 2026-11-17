@@ -72,6 +72,8 @@ async function resolveWalletSetId(
   return newSetId;
 }
 
+const USER_WALLET_TYPES: readonly string[] = ["treasury", "payout", "customer"];
+
 // Authenticate FIRST. Creating a Circle wallet bills our entity, so we must
 // never call the SDK on behalf of an unauthenticated request — `withAuth`
 // enforces that.
@@ -80,6 +82,7 @@ export const POST = withAuth(async (req, { user, supabase }) => {
     const body = await req.json();
     const blockchain: string | undefined = body?.blockchain;
     const name: string | undefined = body?.name;
+    const type: string = body?.type ?? "treasury";
 
     if (!blockchain) {
       return NextResponse.json(
@@ -91,6 +94,14 @@ export const POST = withAuth(async (req, { user, supabase }) => {
     if (!DB_CHAIN_TO_SDK[blockchain]) {
       return NextResponse.json(
         { error: `Unsupported blockchain: ${blockchain}` },
+        { status: 400 }
+      );
+    }
+
+    // gateway_signer wallets are created by /api/wallet/create-gateway-signers.
+    if (!USER_WALLET_TYPES.includes(type)) {
+      return NextResponse.json(
+        { error: `Unsupported wallet type: ${type}` },
         { status: 400 }
       );
     }
@@ -123,6 +134,26 @@ export const POST = withAuth(async (req, { user, supabase }) => {
     }
 
     const newWallet = response.data.wallets[0];
+
+    // Record the wallet here, right after Circle creates it. The dialog used
+    // to insert the row itself once this (slow: the delegate step below waits
+    // on-chain) request returned, so a closed tab or dropped connection left a
+    // Circle wallet the app never knew about.
+    const { error: dbError } = await supabase.from("wallets").insert({
+      user_id: user.id,
+      name: (name && name.trim()) || newWallet.address,
+      circle_wallet_id: newWallet.id,
+      address: newWallet.address,
+      blockchain,
+      type,
+    });
+    if (dbError) {
+      console.error("Failed to save new wallet:", dbError);
+      return NextResponse.json(
+        { error: "Failed to save wallet" },
+        { status: 500 }
+      );
+    }
 
     // After creating the wallet, register the gateway signer if one exists.
     try {

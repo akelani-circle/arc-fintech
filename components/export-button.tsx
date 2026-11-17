@@ -55,9 +55,9 @@ export function ExportButton({ data, filename, type, className }: ExportButtonPr
       return data.filter(isTransaction).map((tx) => ({
         ID: tx.id,
         Amount: tx.amount || 0,
-        Currency: "USD",
-        Sender: shortenAddress(tx.sender_address || ""),
-        Recipient: shortenAddress(tx.recipient_address || ""),
+        Currency: tx.currency || "USDC",
+        Sender: tx.sender_address || "",
+        Recipient: tx.recipient_address || "",
         Status: tx.status || "",
         Type: tx.type || "",
         Blockchain: tx.blockchain || "",

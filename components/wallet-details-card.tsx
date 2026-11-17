@@ -30,7 +30,8 @@ import {
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
-import { getExplorerUrl, formatDate } from "@/lib/utils/data-formatters"
+import { getExplorerUrl } from "@/lib/utils/data-formatters"
+import { LocalDate } from "@/components/local-date"
 import { AddFundsDialog } from "@/components/add-funds-dialog"
 
 // Type definitions
@@ -125,12 +126,12 @@ export function WalletDetailsCard({ wallet }: { wallet: WalletDetails }) {
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-muted-foreground">Created</span>
-                <span className="text-sm">{formatDate(wallet.created_at)}</span>
+                <span className="text-sm"><LocalDate value={wallet.created_at} /></span>
               </div>
               {wallet.updated_at && (
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Updated</span>
-                  <span className="text-sm">{formatDate(wallet.updated_at)}</span>
+                  <span className="text-sm"><LocalDate value={wallet.updated_at} /></span>
                 </div>
               )}
             </div>
@@ -164,7 +165,7 @@ export function WalletDetailsCard({ wallet }: { wallet: WalletDetails }) {
               />
               <Button variant="outline" className="w-full justify-start" disabled>
                 <IconArrowUpRight className="h-4 w-4 mr-2" />
-                Send Funds (comming soon)
+                Send Funds (coming soon)
               </Button>
             </div>
           </div>

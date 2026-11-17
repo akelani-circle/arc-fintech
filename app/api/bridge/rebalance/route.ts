@@ -364,8 +364,6 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           console.error("Failed to update transaction:", updateError);
         }
 
-        // Unblock the responder even if the burn event never fired on its own.
-        signalBurn();
         return { ok: true as const, result };
       })
       .catch(async (bridgeError: AppKitError) => {
@@ -376,7 +374,9 @@ export const POST = withAuth(async (request, { user, supabase }) => {
           .update({ status: "FAILED", tx_hash: burnTxHash })
           .eq("id", txData.id);
 
-        signalBurn();
+        // No signalBurn() here (or on success above): the race below already
+        // waits on settlement, and signalling a burn that never happened made
+        // a pre-burn failure answer 202 PENDING instead of the error.
         return { ok: false as const, error: bridgeError };
       })
       .finally(() => {
@@ -400,11 +400,13 @@ export const POST = withAuth(async (request, { user, supabase }) => {
         const bridgeError = s.error;
         // Map common App Kit errors to friendlier messages.
         let userMessage = bridgeError?.message || "Bridge transfer failed";
-        if (bridgeError?.code === 9002 || bridgeError?.type === "BALANCE") {
+        // Both codes share type "BALANCE", so match on the code.
+        if (bridgeError?.code === 9001) {
+          userMessage =
+            "Not enough USDC in the source wallet to cover the amount plus fees.";
+        } else if (bridgeError?.code === 9002) {
           userMessage =
             "Insufficient source-chain gas. Ensure the source wallet has native currency for gas fees.";
-        } else if (bridgeError?.code === 9001) {
-          userMessage = "Not enough USDC in the source wallet.";
         }
 
         return NextResponse.json(

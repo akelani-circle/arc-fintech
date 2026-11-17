@@ -153,4 +153,26 @@ describe("bridge rebalance event listeners", () => {
     expect(burnHashesFor(10)).toEqual(["0xburn-10.000000"])
     expect(burnHashesFor(20)).toEqual(["0xburn-20.000000"])
   })
+
+  it("reports a failure before the burn as an error, not 202 PENDING", async () => {
+    vi.mocked(kit.bridge).mockRejectedValueOnce(
+      Object.assign(new Error("Insufficient USDC balance"), {
+        code: 9001,
+        type: "BALANCE",
+      })
+    )
+
+    const res = await rebalance(30)
+
+    expect(res.status).toBe(502)
+    expect(await res.json()).toMatchObject({
+      success: false,
+      code: 9001,
+      message: "Not enough USDC in the source wallet to cover the amount plus fees.",
+    })
+    expect([...rowUpdates.values()].flat()).toContainEqual({
+      status: "FAILED",
+      tx_hash: null,
+    })
+  })
 })
