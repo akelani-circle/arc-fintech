@@ -28,7 +28,7 @@ The dashboard is organized into a set of pages, each backed by Circle APIs:
 
 ## Prerequisites
 
-- **Node.js v22+** — Install via [nvm](https://github.com/nvm-sh/nvm)
+- **Node.js v22.12+** — Install via [nvm](https://github.com/nvm-sh/nvm)
 - **Supabase CLI** — Installed with the project's dev dependencies; run it as `npx supabase` (`npm install -g supabase` is not supported). See the [Supabase CLI docs](https://supabase.com/docs/guides/cli/getting-started)
 - **Docker Desktop** (only if using the local Supabase path) — [Install Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - Circle Developer Controlled Wallets **[API key](https://console.circle.com/signin)** and **[Entity Secret](https://developers.circle.com/wallets/dev-controlled/register-entity-secret)**
